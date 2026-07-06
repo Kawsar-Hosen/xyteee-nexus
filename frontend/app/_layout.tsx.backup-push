@@ -1,0 +1,59 @@
+import { Stack } from "expo-router";
+import * as SplashScreen from "expo-splash-screen";
+import { useEffect } from "react";
+import { LogBox, View } from "react-native";
+import { StatusBar } from "expo-status-bar";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { SafeAreaProvider } from "react-native-safe-area-context";
+
+import { useIconFonts } from "@/src/hooks/use-icon-fonts";
+import { useAppFonts } from "@/src/hooks/use-app-fonts";
+import { ThemeProvider, useTheme } from "@/src/context/ThemeContext";
+import { AuthProvider } from "@/src/context/AuthContext";
+import { WsProvider } from "@/src/context/WsContext";
+
+LogBox.ignoreAllLogs(true);
+SplashScreen.preventAutoHideAsync();
+
+function AppShell() {
+  const { mode, colors } = useTheme();
+  return (
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <StatusBar style={mode === "dark" ? "light" : "dark"} />
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          contentStyle: { backgroundColor: colors.background },
+          animation: "fade",
+        }}
+      />
+    </View>
+  );
+}
+
+export default function RootLayout() {
+  const [iconsLoaded, iconsError] = useIconFonts();
+  const [appFontsLoaded, appFontsError] = useAppFonts();
+
+  const ready = (iconsLoaded || iconsError) && (appFontsLoaded || appFontsError);
+
+  useEffect(() => {
+    if (ready) SplashScreen.hideAsync();
+  }, [ready]);
+
+  if (!ready) return null;
+
+  return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <ThemeProvider>
+          <AuthProvider>
+            <WsProvider>
+              <AppShell />
+            </WsProvider>
+          </AuthProvider>
+        </ThemeProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
+  );
+}

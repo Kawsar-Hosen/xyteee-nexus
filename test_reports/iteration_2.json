@@ -1,0 +1,32 @@
+{
+  "summary": "Regression pass after deployment fixes (app.json bundleIdentifier/package + welcome.tsx Google redirect URL). Verified both fixes are in place. Backend: 18/18 pytest cases PASS (auth signup/login/me/forgot-reset/change-password/google-session, users search/get/update, friends full-flow + block/unblock, chats open/list/send-text/image/reply/edit/search/delete, stories create/feed/view/viewers/delete, notifications list/read, WebSocket typing + REST message broadcast + invalid-token rejection). Frontend smoke: welcome screen renders XYTEEE/NEXUS wordmark, 'Continue with Google', 'Create your Nexus account', 'Sign in' CTAs; tapping Continue with Google now navigates to https://auth.emergentagent.com/?redirect=https%3A%2F%2Fnexus-social-hub.preview.emergentagent.com%2F confirming window.location.origin is being used (no Platform.OS fallback). Email signup flow completes and lands on /feed with the Reveries stories carousel + empty 'Nothing echoing yet' conversations state. Tab bar (feed/find/bonds/you) present. No page JS errors. Pre-existing (already reported in iteration_1) React Native Web deprecation warnings still present: shadow* → boxShadow, props.pointerEvents → style.pointerEvents. No new regressions introduced by the deployment fixes.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "multiple screens (StyleSheet shadow props)", "issue": "Console warning: '\"shadow*\" style props are deprecated. Use \"boxShadow\".' — still present (carry-over from iteration_1). Migrate shadowColor/shadowOffset/shadowOpacity/shadowRadius to boxShadow for RN Web parity."},
+      {"component": "multiple screens (props.pointerEvents)", "issue": "Console warning: 'props.pointerEvents is deprecated. Use style.pointerEvents' — carry-over. Move pointerEvents from prop to style."}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_nexus_api.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [
+    "(carry-over from iteration_1) Fix signup/login error rendering so 422 validation errors are stringified rather than shown as '[object Object]'.",
+    "(carry-over) Improve Welcome hero tagline contrast.",
+    "(carry-over) Migrate shadow* → boxShadow and pointerEvents prop → style.pointerEvents."
+  ],
+  "critical_code_review_comments": [
+    "welcome.tsx redirect logic is correct for web (uses window.location.origin + '/'), and gracefully falls back to Linking.createURL('auth') for native. Matches the deployment WARN recommendation.",
+    "app.json ios.bundleIdentifier and android.package both = 'com.xyteee.nexus' — deployment blockers resolved."
+  ],
+  "updated_files": [
+    "/app/test_reports/iteration_2.json (new)",
+    "/app/test_reports/pytest/pytest_results.xml (regenerated)"
+  ],
+  "success_rate": {"backend": "100% (18/18)", "frontend": "100% for the deployment-fix regression scope; ~90% overall (pre-existing signup 422 rendering bug from iteration_1 still open)"},
+  "seed_data_creation": "Backend tests create TEST_alpha/bravo/reset*/chg*/blk1*/blk2* users per run (idempotent random suffix). Frontend smoke created one smoke_<rand>@nexus.io user via signup.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Deployment fixes verified. EXPO_PUBLIC_BACKEND_URL=https://nexus-social-hub.preview.emergentagent.com. Backend suite at /app/backend/tests/test_nexus_api.py (~14s). Google redirect now uses window.location.origin (confirmed via live navigation to auth.emergentagent.com?redirect=... with the frontend origin). Open items from iteration_1 (signup 422 stringification, Welcome contrast, shadow*/pointerEvents deprecations) are still not fixed but out of scope for this iteration."
+}

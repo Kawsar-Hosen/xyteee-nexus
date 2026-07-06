@@ -1,0 +1,7 @@
+- [Replit port routing](replit-port-routing.md) — only the "webview" workflow port (5000/port 80) is publicly reachable; other ports (e.g. 8000) need a proxy.
+- [Proxy architecture](proxy-architecture.md) — reverse proxy on port 5000 routes /api/* → backend:8000, /* → Expo:5001; frontend uses relative URLs on web.
+- [Supabase migration](supabase-migration.md) — MongoDB replaced with Supabase; key quirks: `from` reserved SQL word renamed to `from_user`/`to_user`; friendships always stored sorted (a < b).
+- [Admin panel security](admin-security.md) — email-based admin check is safe because email is fetched from DB (not JWT payload) and unique-constrained; normalize with strip().lower() for defense-in-depth.
+- [Badge type column](badge-migration.md) — badge_type TEXT DEFAULT NULL added to users table; must be added manually via Supabase SQL Editor (PostgREST cannot run DDL).
+- [Frontend node_modules install](frontend-node-install.md) — yarn install only works inside a workflow (not bash sandbox); start_frontend.sh auto-installs if node_modules/expo-router is missing; use CI=1 for non-interactive expo start.
+- [expo-av blocked by cmd-guard](cmd-guard-audio.md) — expo-av is blocked in package.json by the preinstall cmd-guard; use platform-specific files (.web.ts/.ts) to avoid bundling native audio on web; exec syntax in bash: use `export CI=1 && exec npx` not `exec CI=1 npx`.

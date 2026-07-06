@@ -1,0 +1,1288 @@
+"""
+XYTEEE Nexus – Real-Time Social Chat Platform (FastAPI + Supabase/PostgreSQL)
+All endpoints prefixed /api.  WebSocket at /api/ws.
+"""
+from __future__ import annotations
+import httpx
+
+import os
+import uuid
+import logging
+import asyncio
+from pathlib import Path
+from datetime import datetime, timezone, timedelta
+from typing import Optional, List, Dict, Any, Set
+
+import jwt
+from bcrypt import hashpw, checkpw, gensalt
+from fastapi import (
+    FastAPI,
+    APIRouter,
+    Depends,
+    HTTPException,
+    Header,
+    Query,
+    WebSocket,
+    WebSocketDisconnect,
+)
+from starlette.middleware.cors import CORSMiddleware
+from supabase import create_client, Client
+from pydantic import BaseModel, EmailStr, Field
+from dotenv import load_dotenv
+
+# ── Setup ──────────────────────────────────────────────────────────────────────
+ROOT_DIR = Path(__file__).parent
+load_dotenv(ROOT_DIR / ".env")
+
+SUPABASE_URL = os.environ["SUPABASE_URL"]
+SUPABASE_SERVICE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
+JWT_SECRET = os.environ["JWT_SECRET"]
+JWT_ALGORITHM = os.environ.get("JWT_ALGORITHM", "HS256")
+JWT_EXPIRE_DAYS = int(os.environ.get("JWT_EXPIRE_DAYS", "7"))
+
+sb: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
+logger = logging.getLogger("xyteee")
+
+app = FastAPI(title="XYTEEE Nexus API")
+api = APIRouter(prefix="/api")
+
+
+# ── DB helper ──────────────────────────────────────────────────────────────────
+async def run(fn):
+    """Run a sync Supabase call in a thread pool so the event loop stays free."""
+    return await asyncio.to_thread(fn)
+
+
+# ── Utils ──────────────────────────────────────────────────────────────────────
+def now_utc() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def make_id(prefix: str) -> str:
+    return f"{prefix}_{uuid.uuid4().hex[:16]}"
+
+
+def hash_password(pwd: str) -> str:
+    return hashpw(pwd.encode(), gensalt()).decode()
+
+
+def verify_password(pwd: str, hashed: str) -> bool:
+    try:
+        return checkpw(pwd.encode(), hashed.encode())
+    except Exception:
+        return False
+
+
+def create_jwt(user_id: str) -> str:
+    payload = {
+        "sub": user_id,
+        "iat": int(now_utc().timestamp()),
+        "exp": int((now_utc() + timedelta(days=JWT_EXPIRE_DAYS)).timestamp()),
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
+def decode_jwt(token: str) -> Optional[str]:
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        return payload.get("sub")
+    except Exception:
+        return None
+
+
+def ts(dt: datetime) -> str:
+    """Convert datetime → ISO-8601 string for Supabase."""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.isoformat()
+
+
+def parse_ts(s: Optional[str]) -> Optional[datetime]:
+    if not s:
+        return None
+    return datetime.fromisoformat(s.replace("Z", "+00:00"))
+
+
+def jsonable(obj: Any) -> Any:
+    if isinstance(obj, dict):
+        return {k: jsonable(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [jsonable(v) for v in obj]
+    if isinstance(obj, datetime):
+        return ts(obj)
+    return obj
+
+
+_HIDDEN = {"password_hash", "email_verify_token", "password_reset_token", "password_reset_expiry"}
+
+
+def public_user(u: Optional[dict]) -> Optional[dict]:
+    if not u:
+        return None
+    return {k: v for k, v in u.items() if k not in _HIDDEN}
+
+
+async def get_user_public(user_id: str) -> Optional[dict]:
+    r = await run(lambda: sb.table("users").select("*").eq("user_id", user_id).execute())
+    return public_user(r.data[0]) if r.data else None
+
+
+
+async def _send_expo_push(to_user: str, kind: str, data: dict):
+    r = await run(
+        lambda: sb.table("push_tokens")
+        .select("expo_push_token")
+        .eq("user_id", to_user)
+        .execute()
+    )
+
+    tokens = [
+        x.get("expo_push_token")
+        for x in (r.data or [])
+        if x.get("expo_push_token")
+    ]
+    if not tokens:
+        return
+
+    title_map = {
+        "friend_request": "New friend request",
+        "friend_accepted": "Friend request accepted",
+        "message": "New message",
+        "story": "New story notification",
+    }
+
+    messages = [
+        {
+            "to": token,
+            "sound": "default",
+            "title": title_map.get(kind, "XYTEEE Nexus"),
+            "body": data.get("message") or data.get("body") or "You have a new notification",
+            "data": {"kind": kind, **jsonable(data)},
+        }
+        for token in tokens
+    ]
+
+    async with httpx.AsyncClient(timeout=10) as client:
+        await client.post(
+            "https://exp.host/--/api/v2/push/send",
+            json=messages,
+            headers={"Content-Type": "application/json"},
+        )
+
+
+# ── Auth dependency ────────────────────────────────────────────────────────────
+async def current_user(authorization: Optional[str] = Header(None)) -> dict:
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="Missing token")
+    token = authorization.split(" ", 1)[1].strip()
+    user_id = decode_jwt(token)
+    if not user_id:
+        r = await run(lambda: sb.table("user_sessions").select("*").eq("session_token", token).execute())
+        sess = r.data[0] if r.data else None
+        if not sess:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        exp = parse_ts(sess.get("expires_at"))
+        if exp and exp < now_utc():
+            raise HTTPException(status_code=401, detail="Session expired")
+        user_id = sess.get("user_id")
+    user = await get_user_public(user_id)
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    return user
+
+
+# ── WebSocket hub (in-memory presence) ────────────────────────────────────────
+class Hub:
+    def __init__(self):
+        self.connections: Dict[str, Set[WebSocket]] = {}
+
+    async def connect(self, user_id: str, ws: WebSocket):
+        self.connections.setdefault(user_id, set()).add(ws)
+        await run(lambda: sb.table("users")
+            .update({"online": True, "last_seen": ts(now_utc())})
+            .eq("user_id", user_id).execute())
+        await self._broadcast_presence(user_id, True)
+
+    async def disconnect(self, user_id: str, ws: WebSocket):
+        conns = self.connections.get(user_id)
+        if conns:
+            conns.discard(ws)
+        if not conns:
+            self.connections.pop(user_id, None)
+            await run(lambda: sb.table("users")
+                .update({"online": False, "last_seen": ts(now_utc())})
+                .eq("user_id", user_id).execute())
+            await self._broadcast_presence(user_id, False)
+
+    async def send(self, user_id: str, payload: dict):
+        for ws in list(self.connections.get(user_id, set())):
+            try:
+                await ws.send_json(payload)
+            except Exception:
+                pass
+
+    async def _broadcast_presence(self, user_id: str, online: bool):
+        r = await run(lambda: sb.table("friendships").select("a,b")
+            .or_(f"a.eq.{user_id},b.eq.{user_id}").execute())
+        others = [f["a"] if f["b"] == user_id else f["b"] for f in r.data]
+        payload = {
+            "type": "presence",
+            "user_id": user_id,
+            "online": online,
+            "last_seen": ts(now_utc()),
+        }
+        for o in others:
+            await self.send(o, payload)
+
+
+hub = Hub()
+
+
+async def broadcast_to_user(user_id: str, payload: dict):
+    await hub.send(user_id, jsonable(payload))
+
+
+# ── Pydantic models ────────────────────────────────────────────────────────────
+class SignUpIn(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=6)
+    username: str = Field(min_length=3, max_length=24)
+    display_name: str = Field(min_length=1, max_length=48)
+
+
+class LoginIn(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class ForgotIn(BaseModel):
+    email: EmailStr
+
+
+class ResetIn(BaseModel):
+    token: str
+    new_password: str = Field(min_length=6)
+
+
+class VerifyEmailIn(BaseModel):
+    token: str
+
+
+class ChangePwdIn(BaseModel):
+    old_password: str
+    new_password: str = Field(min_length=6)
+
+
+class ProfileUpdate(BaseModel):
+    display_name: Optional[str] = None
+    bio: Optional[str] = None
+    profile_picture: Optional[str] = None
+    cover_picture: Optional[str] = None
+    is_private: Optional[bool] = None
+
+
+class MessageIn(BaseModel):
+    conversation_id: str
+    content: str = ""
+    kind: str = "text"        # text | image | video | voice | file | emoji
+    media: Optional[str] = None
+    file_name: Optional[str] = None
+    reply_to: Optional[str] = None
+
+
+class MessageEdit(BaseModel):
+    content: str
+
+
+class ReactionIn(BaseModel):
+    emoji: str
+
+
+class DeleteAccountIn(BaseModel):
+    password: Optional[str] = None
+
+
+class StoryIn(BaseModel):
+    kind: str = "image"       # image | video
+    media: str
+    caption: Optional[str] = ""
+    is_private: bool = False
+
+
+class FriendActionIn(BaseModel):
+    user_id: str
+
+
+# ── Notification helper ────────────────────────────────────────────────────────
+async def _push_notification(to_user: str, kind: str, data: dict):
+    notif = {
+        "notif_id": make_id("ntf"),
+        "user_id": to_user,
+        "kind": kind,
+        "data": data,
+        "read": False,
+        "created_at": ts(now_utc()),
+    }
+    await run(lambda: sb.table("notifications").insert(notif).execute())
+    await broadcast_to_user(to_user, {"type": "notification", "notification": notif})
+    try:
+        await _send_expo_push(to_user, kind, data)
+    except Exception as e:
+        logger.warning("Expo push failed: %s", e)
+
+
+# ── Auth ───────────────────────────────────────────────────────────────────────
+@api.post("/auth/signup")
+async def signup(body: SignUpIn):
+    email = body.email.lower()
+    r1 = await run(lambda: sb.table("users").select("user_id").eq("email", email).execute())
+    if r1.data:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    r2 = await run(lambda: sb.table("users").select("user_id").eq("username", body.username.lower()).execute())
+    if r2.data:
+        raise HTTPException(status_code=400, detail="Username already taken")
+
+    user_id = make_id("usr")
+    verify_tok = uuid.uuid4().hex
+    doc = {
+        "user_id": user_id,
+        "email": email,
+        "username": body.username.lower(),
+        "display_name": body.display_name,
+        "password_hash": hash_password(body.password),
+        "bio": "",
+        "profile_picture": "",
+        "cover_picture": "",
+        "is_private": False,
+        "email_verified": False,
+        "email_verify_token": verify_tok,
+        "provider": "email",
+        "online": False,
+        "last_seen": ts(now_utc()),
+        "created_at": ts(now_utc()),
+    }
+    await run(lambda: sb.table("users").insert(doc).execute())
+    token = create_jwt(user_id)
+    user = await get_user_public(user_id)
+    return {"token": token, "user": user, "verify_token": verify_tok}
+
+
+@api.post("/auth/login")
+async def login(body: LoginIn):
+    email = body.email.lower()
+    r = await run(lambda: sb.table("users").select("*").eq("email", email).execute())
+    u = r.data[0] if r.data else None
+    if not u or not u.get("password_hash") or not verify_password(body.password, u["password_hash"]):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    await run(lambda: sb.table("users")
+        .update({"online": True, "last_seen": ts(now_utc())})
+        .eq("user_id", u["user_id"]).execute())
+    token = create_jwt(u["user_id"])
+    user = await get_user_public(u["user_id"])
+    return {"token": token, "user": user}
+
+
+@api.get("/auth/me")
+async def me(user=Depends(current_user)):
+    return user
+
+
+@api.post("/auth/logout")
+async def logout(user=Depends(current_user)):
+    await run(lambda: sb.table("users")
+        .update({"online": False, "last_seen": ts(now_utc())})
+        .eq("user_id", user["user_id"]).execute())
+    return {"ok": True}
+
+
+@api.post("/auth/verify-email")
+async def verify_email(body: VerifyEmailIn):
+    r = await run(lambda: sb.table("users").select("user_id").eq("email_verify_token", body.token).execute())
+    if not r.data:
+        raise HTTPException(status_code=400, detail="Invalid token")
+    uid = r.data[0]["user_id"]
+    await run(lambda: sb.table("users")
+        .update({"email_verified": True, "email_verify_token": None})
+        .eq("user_id", uid).execute())
+    return {"ok": True}
+
+
+@api.post("/auth/forgot-password")
+async def forgot_password(body: ForgotIn):
+    email = body.email.lower()
+    r = await run(lambda: sb.table("users").select("user_id").eq("email", email).execute())
+    if not r.data:
+        return {"ok": True}  # don't reveal existence
+    uid = r.data[0]["user_id"]
+    tok = uuid.uuid4().hex
+    expiry = ts(now_utc() + timedelta(hours=1))
+    await run(lambda: sb.table("users")
+        .update({"password_reset_token": tok, "password_reset_expiry": expiry})
+        .eq("user_id", uid).execute())
+    # Token is stored in DB only. To deliver it to the user:
+    # - Set up email delivery (SendGrid / Resend) and send reset link, OR
+    # - Admin can look up the token via /admin/users/{id}/reset-token.
+    # Never return the token in this response — doing so allows account takeover
+    # by any caller who knows the victim's email address.
+    return {"ok": True}
+
+
+@api.post("/auth/reset-password")
+async def reset_password(body: ResetIn):
+    r = await run(lambda: sb.table("users").select("*").eq("password_reset_token", body.token).execute())
+    if not r.data:
+        raise HTTPException(status_code=400, detail="Invalid token")
+    u = r.data[0]
+    exp = parse_ts(u.get("password_reset_expiry"))
+    if exp and exp < now_utc():
+        raise HTTPException(status_code=400, detail="Token expired")
+    await run(lambda: sb.table("users")
+        .update({"password_hash": hash_password(body.new_password),
+                 "password_reset_token": None, "password_reset_expiry": None})
+        .eq("user_id", u["user_id"]).execute())
+    return {"ok": True}
+
+
+@api.post("/auth/change-password")
+async def change_password(body: ChangePwdIn, user=Depends(current_user)):
+    r = await run(lambda: sb.table("users").select("*").eq("user_id", user["user_id"]).execute())
+    u = r.data[0] if r.data else None
+    if not u or not verify_password(body.old_password, u.get("password_hash", "")):
+        raise HTTPException(status_code=400, detail="Invalid current password")
+    await run(lambda: sb.table("users")
+        .update({"password_hash": hash_password(body.new_password)})
+        .eq("user_id", user["user_id"]).execute())
+    return {"ok": True}
+
+
+# ── Users ──────────────────────────────────────────────────────────────────────
+@api.get("/users/search")
+async def search_users(q: str = Query(""), user=Depends(current_user)):
+    if not q:
+        return {"users": []}
+    r = await run(lambda: sb.table("users").select("*")
+        .or_(f"username.ilike.%{q}%,display_name.ilike.%{q}%")
+        .neq("user_id", user["user_id"])
+        .limit(20).execute())
+    return {"users": [public_user(u) for u in r.data]}
+
+
+@api.get("/users/{user_id}")
+async def get_user(user_id: str, user=Depends(current_user)):
+    u = await get_user_public(user_id)
+    if not u:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    # friend + story counts
+    a_s, b_s = sorted([user_id, user_id])  # placeholder, real query below
+    fc = await run(lambda: sb.table("friendships").select("friendship_id", count="exact")
+        .or_(f"a.eq.{user_id},b.eq.{user_id}").execute())
+    sc = await run(lambda: sb.table("stories").select("story_id", count="exact")
+        .eq("user_id", user_id).gt("expires_at", ts(now_utc())).execute())
+    u["friend_count"] = fc.count or 0
+    u["story_count"] = sc.count or 0
+
+    # relation to the caller
+    if user_id != user["user_id"]:
+        fa, fb = sorted([user["user_id"], user_id])
+        fr = await run(lambda: sb.table("friendships").select("friendship_id")
+            .eq("a", fa).eq("b", fb).execute())
+        rel = "friend" if fr.data else "none"
+        if not fr.data:
+            rq = await run(lambda: sb.table("friend_requests").select("request_id")
+                .eq("from_user", user["user_id"]).eq("to_user", user_id).eq("status", "pending").execute())
+            if rq.data:
+                rel = "requested"
+            else:
+                rq2 = await run(lambda: sb.table("friend_requests").select("request_id")
+                    .eq("from_user", user_id).eq("to_user", user["user_id"]).eq("status", "pending").execute())
+                if rq2.data:
+                    rel = "incoming"
+        bl = await run(lambda: sb.table("blocks").select("blocker")
+            .eq("blocker", user["user_id"]).eq("blocked", user_id).execute())
+        if bl.data:
+            rel = "blocked"
+        u["relation"] = rel
+    return u
+
+
+@api.put("/users/me")
+async def update_me(body: ProfileUpdate, user=Depends(current_user)):
+    upd = {k: v for k, v in body.dict().items() if v is not None}
+    if upd:
+        await run(lambda: sb.table("users").update(upd).eq("user_id", user["user_id"]).execute())
+    return await get_user_public(user["user_id"])
+
+
+# ── Friends ────────────────────────────────────────────────────────────────────
+@api.post("/friends/request")
+async def friend_request(body: FriendActionIn, user=Depends(current_user)):
+    target = body.user_id
+    if target == user["user_id"]:
+        raise HTTPException(status_code=400, detail="Cannot friend self")
+    exists = await run(lambda: sb.table("users").select("user_id").eq("user_id", target).execute())
+    if not exists.data:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    fa, fb = sorted([user["user_id"], target])
+    already = await run(lambda: sb.table("friendships").select("friendship_id").eq("a", fa).eq("b", fb).execute())
+    if already.data:
+        raise HTTPException(status_code=400, detail="Already friends")
+
+    exist_req = await run(lambda: sb.table("friend_requests").select("request_id")
+        .eq("from_user", user["user_id"]).eq("to_user", target).eq("status", "pending").execute())
+    if exist_req.data:
+        raise HTTPException(status_code=400, detail="Already requested")
+
+    reverse = await run(lambda: sb.table("friend_requests").select("request_id")
+        .eq("from_user", target).eq("to_user", user["user_id"]).eq("status", "pending").execute())
+    if reverse.data:
+        return await friend_accept(FriendActionIn(user_id=target), user)
+
+    req_id = make_id("frq")
+    await run(lambda: sb.table("friend_requests").insert({
+        "request_id": req_id,
+        "from_user": user["user_id"],
+        "to_user": target,
+        "status": "pending",
+        "created_at": ts(now_utc()),
+    }).execute())
+    await _push_notification(target, "friend_request", {
+        "from": user["user_id"], "from_name": user["display_name"], "request_id": req_id,
+    })
+    return {"ok": True, "request_id": req_id}
+
+
+@api.post("/friends/accept")
+async def friend_accept(body: FriendActionIn, user=Depends(current_user)):
+    r = await run(lambda: sb.table("friend_requests").select("*")
+        .eq("from_user", body.user_id).eq("to_user", user["user_id"]).eq("status", "pending").execute())
+    if not r.data:
+        raise HTTPException(status_code=404, detail="No request")
+    req = r.data[0]
+    await run(lambda: sb.table("friend_requests")
+        .update({"status": "accepted", "resolved_at": ts(now_utc())})
+        .eq("request_id", req["request_id"]).execute())
+    fa, fb = sorted([user["user_id"], body.user_id])
+    await run(lambda: sb.table("friendships").insert({
+        "friendship_id": make_id("frn"), "a": fa, "b": fb, "created_at": ts(now_utc()),
+    }).execute())
+    await _push_notification(body.user_id, "friend_accepted", {
+        "from": user["user_id"], "from_name": user["display_name"],
+    })
+    return {"ok": True}
+
+
+@api.post("/friends/reject")
+async def friend_reject(body: FriendActionIn, user=Depends(current_user)):
+    await run(lambda: sb.table("friend_requests")
+        .update({"status": "rejected", "resolved_at": ts(now_utc())})
+        .eq("from_user", body.user_id).eq("to_user", user["user_id"]).eq("status", "pending").execute())
+    return {"ok": True}
+
+
+@api.post("/friends/cancel")
+async def friend_cancel(body: FriendActionIn, user=Depends(current_user)):
+    await run(lambda: sb.table("friend_requests").delete()
+        .eq("from_user", user["user_id"]).eq("to_user", body.user_id).eq("status", "pending").execute())
+    return {"ok": True}
+
+
+@api.post("/friends/unfriend")
+async def unfriend(body: FriendActionIn, user=Depends(current_user)):
+    fa, fb = sorted([user["user_id"], body.user_id])
+    await run(lambda: sb.table("friendships").delete().eq("a", fa).eq("b", fb).execute())
+    return {"ok": True}
+
+
+@api.post("/friends/block")
+async def block_user(body: FriendActionIn, user=Depends(current_user)):
+    if body.user_id == user["user_id"]:
+        raise HTTPException(status_code=400, detail="Cannot block self")
+    fa, fb = sorted([user["user_id"], body.user_id])
+    await run(lambda: sb.table("friendships").delete().eq("a", fa).eq("b", fb).execute())
+    await run(lambda: sb.table("friend_requests").delete()
+        .or_(f"and(from_user.eq.{user['user_id']},to_user.eq.{body.user_id}),"
+             f"and(from_user.eq.{body.user_id},to_user.eq.{user['user_id']})").execute())
+    await run(lambda: sb.table("blocks").upsert({
+        "blocker": user["user_id"], "blocked": body.user_id, "created_at": ts(now_utc()),
+    }).execute())
+    return {"ok": True}
+
+
+@api.post("/friends/unblock")
+async def unblock_user(body: FriendActionIn, user=Depends(current_user)):
+    await run(lambda: sb.table("blocks").delete()
+        .eq("blocker", user["user_id"]).eq("blocked", body.user_id).execute())
+    return {"ok": True}
+
+
+@api.get("/friends")
+async def friends_list(user=Depends(current_user)):
+    r = await run(lambda: sb.table("friendships").select("a,b")
+        .or_(f"a.eq.{user['user_id']},b.eq.{user['user_id']}").execute())
+    ids = [f["a"] if f["b"] == user["user_id"] else f["b"] for f in r.data]
+    if not ids:
+        return {"friends": []}
+    ur = await run(lambda: sb.table("users").select("*").in_("user_id", ids).execute())
+    return {"friends": [public_user(u) for u in ur.data]}
+
+
+@api.get("/friends/requests")
+async def friend_requests_list(user=Depends(current_user)):
+    inc_r = await run(lambda: sb.table("friend_requests").select("*")
+        .eq("to_user", user["user_id"]).eq("status", "pending").execute())
+    out_r = await run(lambda: sb.table("friend_requests").select("*")
+        .eq("from_user", user["user_id"]).eq("status", "pending").execute())
+
+    async def hydrate(reqs: list, id_field: str) -> list:
+        ids = [r[id_field] for r in reqs]
+        if not ids:
+            return reqs
+        ur = await run(lambda: sb.table("users").select("*").in_("user_id", ids).execute())
+        umap = {u["user_id"]: public_user(u) for u in ur.data}
+        for r in reqs:
+            r["user"] = umap.get(r[id_field])
+        return reqs
+
+    incoming = await hydrate(inc_r.data, "from_user")
+    outgoing = await hydrate(out_r.data, "to_user")
+    return {"incoming": incoming, "outgoing": outgoing}
+
+
+@api.get("/friends/mutual/{other_id}")
+async def mutual(other_id: str, user=Depends(current_user)):
+    my_r = await run(lambda: sb.table("friendships").select("a,b")
+        .or_(f"a.eq.{user['user_id']},b.eq.{user['user_id']}").execute())
+    my_ids = {f["a"] if f["b"] == user["user_id"] else f["b"] for f in my_r.data}
+    ot_r = await run(lambda: sb.table("friendships").select("a,b")
+        .or_(f"a.eq.{other_id},b.eq.{other_id}").execute())
+    ot_ids = {f["a"] if f["b"] == other_id else f["b"] for f in ot_r.data}
+    mutual_ids = list(my_ids & ot_ids)
+    if not mutual_ids:
+        return {"mutual": []}
+    ur = await run(lambda: sb.table("users").select("*").in_("user_id", mutual_ids).execute())
+    return {"mutual": [public_user(u) for u in ur.data]}
+
+
+@api.get("/blocks")
+async def blocks_list(user=Depends(current_user)):
+    r = await run(lambda: sb.table("blocks").select("blocked").eq("blocker", user["user_id"]).execute())
+    ids = [d["blocked"] for d in r.data]
+    if not ids:
+        return {"blocked": []}
+    ur = await run(lambda: sb.table("users").select("*").in_("user_id", ids).execute())
+    return {"blocked": [public_user(u) for u in ur.data]}
+
+
+# ── Chats ──────────────────────────────────────────────────────────────────────
+def _conv_id_for(a: str, b: str) -> str:
+    x, y = sorted([a, b])
+    return f"cnv_{x[:8]}_{y[:8]}"
+
+
+@api.post("/chats/open")
+async def open_chat(body: FriendActionIn, user=Depends(current_user)):
+    other = body.user_id
+    r = await run(lambda: sb.table("users").select("user_id").eq("user_id", other).execute())
+    if not r.data:
+        raise HTTPException(status_code=404, detail="Not found")
+    conv_id = _conv_id_for(user["user_id"], other)
+    cr = await run(lambda: sb.table("conversations").select("*").eq("conversation_id", conv_id).execute())
+    if cr.data:
+        conv = cr.data[0]
+    else:
+        conv = {
+            "conversation_id": conv_id,
+            "participants": sorted([user["user_id"], other]),
+            "created_at": ts(now_utc()),
+            "last_message": None,
+            "last_message_at": ts(now_utc()),
+        }
+        await run(lambda: sb.table("conversations").insert(conv).execute())
+    return {"conversation": conv}
+
+
+@api.get("/chats")
+async def list_chats(user=Depends(current_user)):
+    r = await run(lambda: sb.table("conversations").select("*")
+        .contains("participants", [user["user_id"]])
+        .order("last_message_at", desc=True).limit(200).execute())
+    out = []
+    for c in r.data:
+        other_ids = [p for p in c["participants"] if p != user["user_id"]]
+        if not other_ids:
+            continue
+        other = other_ids[0]
+        ur = await run(lambda: sb.table("users").select("*").eq("user_id", other).execute())
+        other_user = public_user(ur.data[0]) if ur.data else None
+        # unread: messages in this conv not from me, not in my read_by
+        all_msgs = await run(lambda: sb.table("messages").select("message_id,sender_id,read_by,deleted_for")
+            .eq("conversation_id", c["conversation_id"])
+            .eq("deleted_for_everyone", False).execute())
+        unread = sum(
+            1 for m in all_msgs.data
+            if m["sender_id"] != user["user_id"]
+            and user["user_id"] not in (m.get("read_by") or [])
+            and user["user_id"] not in (m.get("deleted_for") or [])
+        )
+        c["other_user"] = other_user
+        c["unread"] = unread
+        out.append(c)
+    return {"chats": out}
+
+
+@api.get("/chats/{conversation_id}/messages")
+async def list_messages(
+    conversation_id: str,
+    limit: int = 50,
+    before: Optional[str] = None,
+    user=Depends(current_user),
+):
+    cr = await run(lambda: sb.table("conversations").select("participants")
+        .eq("conversation_id", conversation_id).execute())
+    if not cr.data or user["user_id"] not in cr.data[0]["participants"]:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    qb = (sb.table("messages").select("*")
+          .eq("conversation_id", conversation_id)
+          .order("created_at", desc=True)
+          .limit(limit))
+
+    if before:
+        br = await run(lambda: sb.table("messages").select("created_at")
+            .eq("message_id", before).execute())
+        if br.data:
+            qb = qb.lt("created_at", br.data[0]["created_at"])
+
+    msgs_r = await run(lambda: qb.execute())
+    msgs = list(reversed(msgs_r.data))
+
+    # Filter deleted_for in Python, mark read
+    visible = []
+    for msg in msgs:
+        if user["user_id"] in (msg.get("deleted_for") or []):
+            continue
+        visible.append(msg)
+        if msg["sender_id"] != user["user_id"] and user["user_id"] not in (msg.get("read_by") or []):
+            new_rb = list(set((msg.get("read_by") or []) + [user["user_id"]]))
+            mid = msg["message_id"]
+            await run(lambda: sb.table("messages").update({"read_by": new_rb}).eq("message_id", mid).execute())
+            msg["read_by"] = new_rb
+
+    return {"messages": visible}
+
+
+@api.post("/chats/message")
+async def send_message(body: MessageIn, user=Depends(current_user)):
+    cr = await run(lambda: sb.table("conversations").select("*")
+        .eq("conversation_id", body.conversation_id).execute())
+    if not cr.data or user["user_id"] not in cr.data[0]["participants"]:
+        raise HTTPException(status_code=404, detail="Not found")
+    conv = cr.data[0]
+    msg_id = make_id("msg")
+    other_ids = [p for p in conv["participants"] if p != user["user_id"]]
+    msg = {
+        "message_id": msg_id,
+        "conversation_id": body.conversation_id,
+        "sender_id": user["user_id"],
+        "content": body.content,
+        "kind": body.kind,
+        "media": body.media,
+        "file_name": body.file_name,
+        "reply_to": body.reply_to,
+        "edited": False,
+        "deleted_for_everyone": False,
+        "deleted_for": [],
+        "read_by": [user["user_id"]],
+        "delivered_to": conv["participants"],
+        "reactions": [],
+        "created_at": ts(now_utc()),
+    }
+    await run(lambda: sb.table("messages").insert(msg).execute())
+    preview = body.content[:80] if body.kind == "text" else f"[{body.kind}]"
+    await run(lambda: sb.table("conversations")
+        .update({"last_message": preview, "last_message_at": ts(now_utc())})
+        .eq("conversation_id", body.conversation_id).execute())
+    for p in conv["participants"]:
+        await broadcast_to_user(p, {"type": "message", "message": msg})
+    for other in other_ids:
+        await _push_notification(other, "message", {
+            "conversation_id": body.conversation_id,
+            "from": user["user_id"],
+            "from_name": user["display_name"],
+            "preview": preview,
+        })
+    return msg
+
+
+@api.put("/chats/message/{message_id}")
+async def edit_message(message_id: str, body: MessageEdit, user=Depends(current_user)):
+    mr = await run(lambda: sb.table("messages").select("*").eq("message_id", message_id).execute())
+    if not mr.data or mr.data[0]["sender_id"] != user["user_id"]:
+        raise HTTPException(status_code=404, detail="Not found")
+    msg = mr.data[0]
+    await run(lambda: sb.table("messages")
+        .update({"content": body.content, "edited": True})
+        .eq("message_id", message_id).execute())
+    updated_r = await run(lambda: sb.table("messages").select("*").eq("message_id", message_id).execute())
+    updated = updated_r.data[0]
+    cr = await run(lambda: sb.table("conversations").select("participants")
+        .eq("conversation_id", msg["conversation_id"]).execute())
+    if cr.data:
+        for p in cr.data[0]["participants"]:
+            await broadcast_to_user(p, {"type": "message_edit", "message": updated})
+    return updated
+
+
+@api.delete("/chats/message/{message_id}")
+async def delete_message(message_id: str, scope: str = Query("me"), user=Depends(current_user)):
+    mr = await run(lambda: sb.table("messages").select("*").eq("message_id", message_id).execute())
+    if not mr.data:
+        raise HTTPException(status_code=404, detail="Not found")
+    msg = mr.data[0]
+    if scope == "everyone":
+        if msg["sender_id"] != user["user_id"]:
+            raise HTTPException(status_code=403, detail="Not sender")
+        await run(lambda: sb.table("messages")
+            .update({"deleted_for_everyone": True, "content": "", "media": None, "kind": "deleted"})
+            .eq("message_id", message_id).execute())
+        cr = await run(lambda: sb.table("conversations").select("participants")
+            .eq("conversation_id", msg["conversation_id"]).execute())
+        if cr.data:
+            for p in cr.data[0]["participants"]:
+                await broadcast_to_user(p, {"type": "message_delete", "message_id": message_id})
+    else:
+        new_df = list(set((msg.get("deleted_for") or []) + [user["user_id"]]))
+        await run(lambda: sb.table("messages").update({"deleted_for": new_df}).eq("message_id", message_id).execute())
+    return {"ok": True}
+
+
+@api.get("/chats/{conversation_id}/search")
+async def search_messages(conversation_id: str, q: str, user=Depends(current_user)):
+    cr = await run(lambda: sb.table("conversations").select("participants")
+        .eq("conversation_id", conversation_id).execute())
+    if not cr.data or user["user_id"] not in cr.data[0]["participants"]:
+        raise HTTPException(status_code=404, detail="Not found")
+    mr = await run(lambda: sb.table("messages").select("*")
+        .eq("conversation_id", conversation_id)
+        .eq("deleted_for_everyone", False)
+        .ilike("content", f"%{q}%")
+        .order("created_at", desc=True)
+        .limit(50).execute())
+    return {"messages": mr.data}
+
+
+@api.post("/chats/message/{message_id}/react")
+async def react_message(message_id: str, body: ReactionIn, user=Depends(current_user)):
+    mr = await run(lambda: sb.table("messages").select("*").eq("message_id", message_id).execute())
+    if not mr.data:
+        raise HTTPException(status_code=404, detail="Not found")
+    msg = mr.data[0]
+    cr = await run(lambda: sb.table("conversations").select("participants")
+        .eq("conversation_id", msg["conversation_id"]).execute())
+    if not cr.data or user["user_id"] not in cr.data[0]["participants"]:
+        raise HTTPException(status_code=403, detail="Not allowed")
+
+    reactions: list = list(msg.get("reactions") or [])
+    existing = next((r for r in reactions if r.get("user_id") == user["user_id"]), None)
+    if existing and existing.get("emoji") == body.emoji:
+        reactions = [r for r in reactions if r.get("user_id") != user["user_id"]]
+    else:
+        reactions = [r for r in reactions if r.get("user_id") != user["user_id"]]
+        reactions.append({"user_id": user["user_id"], "emoji": body.emoji, "at": ts(now_utc())})
+
+    await run(lambda: sb.table("messages").update({"reactions": reactions}).eq("message_id", message_id).execute())
+    updated_r = await run(lambda: sb.table("messages").select("*").eq("message_id", message_id).execute())
+    updated = updated_r.data[0]
+    for p in cr.data[0]["participants"]:
+        await broadcast_to_user(p, {"type": "message_react", "message": updated})
+    return updated
+
+
+@api.delete("/users/me")
+async def delete_account(body: DeleteAccountIn, user=Depends(current_user)):
+    ur = await run(lambda: sb.table("users").select("*").eq("user_id", user["user_id"]).execute())
+    u = ur.data[0] if ur.data else None
+    if u and u.get("provider") == "email" and u.get("password_hash"):
+        if not body.password or not verify_password(body.password, u["password_hash"]):
+            raise HTTPException(status_code=400, detail="Password required to delete account")
+    uid = user["user_id"]
+    await run(lambda: sb.table("stories").delete().eq("user_id", uid).execute())
+    await run(lambda: sb.table("notifications").delete().eq("user_id", uid).execute())
+    await run(lambda: sb.table("friend_requests").delete()
+        .or_(f"from_user.eq.{uid},to_user.eq.{uid}").execute())
+    await run(lambda: sb.table("friendships").delete().or_(f"a.eq.{uid},b.eq.{uid}").execute())
+    await run(lambda: sb.table("blocks").delete().or_(f"blocker.eq.{uid},blocked.eq.{uid}").execute())
+    await run(lambda: sb.table("messages")
+        .update({"deleted_for_everyone": True, "content": "", "media": None, "kind": "deleted"})
+        .eq("sender_id", uid).execute())
+    convs_r = await run(lambda: sb.table("conversations").select("*")
+        .contains("participants", [uid]).execute())
+    for c in convs_r.data:
+        remaining = [p for p in c["participants"] if p != uid]
+        cid = c["conversation_id"]
+        if not remaining:
+            await run(lambda: sb.table("messages").delete().eq("conversation_id", cid).execute())
+            await run(lambda: sb.table("conversations").delete().eq("conversation_id", cid).execute())
+        else:
+            await run(lambda: sb.table("conversations")
+                .update({"participants": remaining}).eq("conversation_id", cid).execute())
+    await run(lambda: sb.table("user_sessions").delete().eq("user_id", uid).execute())
+    await run(lambda: sb.table("users").delete().eq("user_id", uid).execute())
+    return {"ok": True}
+
+
+# ── Stories ────────────────────────────────────────────────────────────────────
+@api.post("/stories")
+async def create_story(body: StoryIn, user=Depends(current_user)):
+    story_id = make_id("sty")
+    doc = {
+        "story_id": story_id,
+        "user_id": user["user_id"],
+        "kind": body.kind,
+        "media": body.media,
+        "caption": body.caption or "",
+        "is_private": body.is_private,
+        "viewers": [],
+        "created_at": ts(now_utc()),
+        "expires_at": ts(now_utc() + timedelta(hours=24)),
+    }
+    await run(lambda: sb.table("stories").insert(doc).execute())
+    fr = await run(lambda: sb.table("friendships").select("a,b")
+        .or_(f"a.eq.{user['user_id']},b.eq.{user['user_id']}").execute())
+    for f in fr.data:
+        other = f["a"] if f["b"] == user["user_id"] else f["b"]
+        await broadcast_to_user(other, {"type": "story_new", "story_id": story_id, "user_id": user["user_id"]})
+        await _push_notification(other, "story", {
+            "from": user["user_id"], "from_name": user["display_name"], "story_id": story_id,
+        })
+    return doc
+
+
+@api.get("/stories/feed")
+async def stories_feed(user=Depends(current_user)):
+    fr = await run(lambda: sb.table("friendships").select("a,b")
+        .or_(f"a.eq.{user['user_id']},b.eq.{user['user_id']}").execute())
+    ids = [f["a"] if f["b"] == user["user_id"] else f["b"] for f in fr.data]
+    ids.append(user["user_id"])
+
+    sr = await run(lambda: sb.table("stories").select("*")
+        .in_("user_id", ids)
+        .gt("expires_at", ts(now_utc()))
+        .order("created_at", desc=True).execute())
+
+    by_user: Dict[str, List[dict]] = {}
+    for s in sr.data:
+        by_user.setdefault(s["user_id"], []).append(s)
+
+    uid_list = list(by_user.keys())
+    if not uid_list:
+        return {"feed": []}
+
+    ur = await run(lambda: sb.table("users").select("*").in_("user_id", uid_list).execute())
+    umap = {u["user_id"]: public_user(u) for u in ur.data}
+
+    out = [{"user": umap.get(uid), "stories": stories_} for uid, stories_ in by_user.items()]
+    out.sort(key=lambda x: (0 if x["user"] and x["user"]["user_id"] == user["user_id"] else 1, -len(x["stories"])))
+    return {"feed": out}
+
+
+@api.post("/stories/{story_id}/view")
+async def view_story(story_id: str, user=Depends(current_user)):
+    sr = await run(lambda: sb.table("stories").select("*").eq("story_id", story_id).execute())
+    if not sr.data:
+        raise HTTPException(status_code=404, detail="Not found")
+    s = sr.data[0]
+    viewers: list = list(s.get("viewers") or [])
+    if user["user_id"] != s["user_id"] and not any(v.get("user_id") == user["user_id"] for v in viewers):
+        viewers.append({"user_id": user["user_id"], "viewed_at": ts(now_utc())})
+        await run(lambda: sb.table("stories").update({"viewers": viewers}).eq("story_id", story_id).execute())
+    return {"ok": True}
+
+
+@api.get("/stories/{story_id}/viewers")
+async def story_viewers(story_id: str, user=Depends(current_user)):
+    sr = await run(lambda: sb.table("stories").select("*").eq("story_id", story_id).execute())
+    if not sr.data or sr.data[0]["user_id"] != user["user_id"]:
+        raise HTTPException(status_code=403, detail="Not allowed")
+    s = sr.data[0]
+    viewers_raw: list = s.get("viewers") or []
+    ids = [v["user_id"] for v in viewers_raw]
+    if not ids:
+        return {"viewers": [], "count": 0}
+    ur = await run(lambda: sb.table("users").select("*").in_("user_id", ids).execute())
+    umap = {u["user_id"]: public_user(u) for u in ur.data}
+    viewers = [{"user": umap.get(v["user_id"]), "viewed_at": v["viewed_at"]} for v in viewers_raw]
+    return {"viewers": viewers, "count": len(viewers)}
+
+
+@api.delete("/stories/{story_id}")
+async def delete_story(story_id: str, user=Depends(current_user)):
+    sr = await run(lambda: sb.table("stories").select("story_id,user_id").eq("story_id", story_id).execute())
+    if not sr.data or sr.data[0]["user_id"] != user["user_id"]:
+        raise HTTPException(status_code=403, detail="Not allowed")
+    await run(lambda: sb.table("stories").delete().eq("story_id", story_id).execute())
+    return {"ok": True}
+
+
+class StoryReactBody(BaseModel):
+    emoji: str = "❤️"
+
+
+@api.post("/stories/{story_id}/react")
+async def react_to_story(story_id: str, body: StoryReactBody, user=Depends(current_user)):
+    sr = await run(lambda: sb.table("stories").select("story_id,user_id").eq("story_id", story_id).execute())
+    if not sr.data:
+        raise HTTPException(status_code=404, detail="Not found")
+    owner_id = sr.data[0]["user_id"]
+    # Broadcast ephemeral reaction event to the story owner via WebSocket
+    await broadcast_to_user(owner_id, {
+        "type": "story_react",
+        "story_id": story_id,
+        "emoji": body.emoji,
+        "from_user_id": user["user_id"],
+        "from_name": user.get("display_name", ""),
+    })
+    return {"ok": True}
+
+
+# ── Notifications ──────────────────────────────────────────────────────────────
+@api.get("/notifications")
+async def list_notifications(user=Depends(current_user)):
+    r = await run(lambda: sb.table("notifications").select("*")
+        .eq("user_id", user["user_id"])
+        .order("created_at", desc=True).limit(100).execute())
+    return {"notifications": r.data}
+
+
+@api.post("/notifications/read")
+async def mark_all_read(user=Depends(current_user)):
+    await run(lambda: sb.table("notifications")
+        .update({"read": True})
+        .eq("user_id", user["user_id"]).eq("read", False).execute())
+    return {"ok": True}
+
+
+@api.post("/notifications/{notif_id}/read")
+async def mark_read(notif_id: str, user=Depends(current_user)):
+    await run(lambda: sb.table("notifications")
+        .update({"read": True})
+        .eq("notif_id", notif_id).eq("user_id", user["user_id"]).execute())
+    return {"ok": True}
+
+
+# ── WebSocket ──────────────────────────────────────────────────────────────────
+@app.websocket("/api/ws")
+async def websocket_endpoint(ws: WebSocket, token: str):
+    user_id = decode_jwt(token)
+    if not user_id:
+        r = await run(lambda: sb.table("user_sessions").select("user_id").eq("session_token", token).execute())
+        user_id = r.data[0]["user_id"] if r.data else None
+    if not user_id:
+        await ws.close(code=4401)
+        return
+    await ws.accept()
+    await hub.connect(user_id, ws)
+    try:
+        while True:
+            data = await ws.receive_json()
+            t = data.get("type")
+            if t == "typing":
+                conv_id = data.get("conversation_id")
+                if conv_id:
+                    cr = await run(lambda: sb.table("conversations").select("participants")
+                        .eq("conversation_id", conv_id).execute())
+                    if cr.data and user_id in cr.data[0]["participants"]:
+                        for p in cr.data[0]["participants"]:
+                            if p != user_id:
+                                await hub.send(p, {
+                                    "type": "typing",
+                                    "conversation_id": conv_id,
+                                    "user_id": user_id,
+                                    "is_typing": bool(data.get("is_typing")),
+                                })
+            elif t == "ping":
+                await ws.send_json({"type": "pong"})
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logger.exception("ws error: %s", e)
+    finally:
+        await hub.disconnect(user_id, ws)
+
+
+# ── Admin ──────────────────────────────────────────────────────────────────────
+ADMIN_EMAIL = "smdkawsar2@gmail.com"
+
+# Optional: set ADMIN_USER_ID in environment to pin admin to a specific user_id.
+# This is the most stable/secure option. Get your user_id from /api/auth/me after
+# first login, then set: ADMIN_USER_ID=usr_xxxxxxxxxxxxxxxx in your .env file.
+# If not set, falls back to email matching (safe once admin account is registered,
+# because email has a UNIQUE DB constraint — no other account can hold it).
+_ADMIN_USER_ID = os.environ.get("ADMIN_USER_ID", "").strip()
+
+VALID_BADGE_TYPES = {"blue", "gold", "gray"}
+
+
+async def require_admin(user: dict = Depends(current_user)) -> dict:
+    """
+    Dependency that rejects any non-admin request with 403.
+
+    Two-layer check:
+    1. If ADMIN_USER_ID env var is set → check user_id (most stable).
+    2. Otherwise → fall back to email match (safe once admin account exists,
+       because email is unique in DB and fetched server-side, not from JWT).
+    """
+    if _ADMIN_USER_ID:
+        if user.get("user_id") != _ADMIN_USER_ID:
+            raise HTTPException(status_code=403, detail="Admin access required")
+    else:
+        if user.get("email", "").strip().lower() != ADMIN_EMAIL.lower():
+            raise HTTPException(status_code=403, detail="Admin access required")
+    return user
+
+
+class BadgeBody(BaseModel):
+    badge_type: Optional[str] = None  # None = remove badge
+
+
+@api.get("/admin/users")
+async def admin_list_users(
+    q: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=500),
+    _admin: dict = Depends(require_admin),
+):
+    """List all users (admin). Optional ?q= filters by username/display_name/email."""
+    query = sb.table("users").select(
+        "user_id,email,username,display_name,profile_picture,bio,badge_type,online,created_at,email_verified"
+    )
+    if q:
+        # ilike search across multiple columns
+        query = query.or_(
+            f"username.ilike.%{q}%,display_name.ilike.%{q}%,email.ilike.%{q}%"
+        )
+    r = await run(lambda: query.order("created_at", desc=True).limit(limit).execute())
+    return {"users": r.data or [], "total": len(r.data or [])}
+
+
+@api.get("/admin/users/{user_id}")
+async def admin_get_user(
+    user_id: str,
+    _admin: dict = Depends(require_admin),
+):
+    """Get full (public) details for any user (admin)."""
+    r = await run(lambda: sb.table("users").select(
+        "user_id,email,username,display_name,profile_picture,cover_picture,bio,"
+        "badge_type,online,last_seen,created_at,email_verified,is_private,provider"
+    ).eq("user_id", user_id).execute())
+    if not r.data:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"user": r.data[0]}
+
+
+@api.get("/admin/users/{user_id}/reset-token")
+async def admin_get_reset_token(
+    user_id: str,
+    _admin: dict = Depends(require_admin),
+):
+    """Get the pending password reset token for a user (admin only).
+    Used to manually deliver the token to the user when email is not configured."""
+    r = await run(lambda: sb.table("users")
+        .select("user_id,email,username,password_reset_token,password_reset_expiry")
+        .eq("user_id", user_id).execute())
+    if not r.data:
+        raise HTTPException(status_code=404, detail="User not found")
+    u = r.data[0]
+    tok = u.get("password_reset_token")
+    exp = parse_ts(u.get("password_reset_expiry"))
+    if not tok:
+        return {"reset_token": None, "expired": False, "message": "No pending reset token"}
+    expired = bool(exp and exp < now_utc())
+    return {"reset_token": tok, "expired": expired, "expires_at": u.get("password_reset_expiry")}
+
+
+@api.put("/admin/users/{user_id}/badge")
+async def admin_set_badge(
+    user_id: str,
+    body: BadgeBody,
+    _admin: dict = Depends(require_admin),
+):
+    """Assign or remove a verification badge from a user (admin only)."""
+    badge = body.badge_type
+    if badge is not None and badge not in VALID_BADGE_TYPES:
+        raise HTTPException(status_code=400, detail=f"Invalid badge type. Valid: {sorted(VALID_BADGE_TYPES)}")
+    # Verify user exists
+    ur = await run(lambda: sb.table("users").select("user_id").eq("user_id", user_id).execute())
+    if not ur.data:
+        raise HTTPException(status_code=404, detail="User not found")
+    await run(lambda: sb.table("users").update({"badge_type": badge}).eq("user_id", user_id).execute())
+    return {"ok": True, "badge_type": badge}
+
+
+# ── Startup ────────────────────────────────────────────────────────────────────
+@app.on_event("startup")
+async def startup():
+    # Ensure badge_type column exists (graceful check on startup)
+    try:
+        await run(lambda: sb.table("users").select("badge_type").limit(1).execute())
+        logger.info("badge_type column ✅")
+    except Exception:
+        logger.warning(
+            "⚠️  badge_type column missing. Run in Supabase SQL Editor:\n"
+            "    ALTER TABLE users ADD COLUMN IF NOT EXISTS badge_type TEXT DEFAULT NULL;"
+        )
+    # Log admin config status for first-run setup
+    if _ADMIN_USER_ID:
+        logger.info("Admin locked to user_id: %s", _ADMIN_USER_ID)
+    else:
+        logger.info(
+            "Admin access: email-based (%s). "
+            "For stronger binding set ADMIN_USER_ID=<your_user_id> in .env "
+            "(get it from GET /api/auth/me after logging in).",
+            ADMIN_EMAIL,
+        )
+    logger.info("XYTEEE Nexus API ready — Supabase backend")
+
+
+@api.get("/")
+async def root():
+    return {"app": "XYTEEE Nexus", "ok": True}
+
+
+app.include_router(api)
+app.add_middleware(
+    CORSMiddleware,
+    allow_credentials=True,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ── Push Notification Token ──────────────────────────────────────────
+
+class PushTokenIn(BaseModel):
+    expo_push_token: str
+    device_name: Optional[str] = ""
+
+@api.post("/push-token")
+async def save_push_token(body: PushTokenIn, user=Depends(current_user)):
+    doc = {
+        "user_id": user["user_id"],
+        "expo_push_token": body.expo_push_token,
+        "device_name": body.device_name or "",
+        "updated_at": ts(now_utc()),
+    }
+
+    await run(
+        lambda: sb.table("push_tokens")
+        .upsert(doc, on_conflict="user_id,expo_push_token")
+        .execute()
+    )
+
+    return {"ok": True}
