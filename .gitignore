@@ -12,3 +12,5 @@ __pycache__/
 .local/
 
 .local/
+
+frontend/assets/icon.png
