@@ -10,10 +10,17 @@ import { useWs } from "@/src/context/WsContext";
 import { api } from "@/src/api/client";
 import { NxText } from "@/src/components/NxText";
 import { Avatar } from "@/src/components/Avatar";
+import { VerifiedBadge } from "@/src/components/VerifiedBadge";
 import { fonts, radii, spacing } from "@/src/theme";
 import { DOCK_PAD } from "@/src/theme/layout";
 
 type Tab = "friends" | "requests";
+
+let friendsCache: {
+  friends: any[];
+  incoming: any[];
+  outgoing: any[];
+} | null = null;
 
 export default function Friends() {
   const { colors } = useTheme();
@@ -21,11 +28,12 @@ export default function Friends() {
   const { subscribe } = useWs();
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("friends");
-  const [friends, setFriends] = useState<any[]>([]);
-  const [incoming, setIncoming] = useState<any[]>([]);
-  const [outgoing, setOutgoing] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [friends, setFriends] = useState<any[]>(() => friendsCache?.friends || []);
+  const [incoming, setIncoming] = useState<any[]>(() => friendsCache?.incoming || []);
+  const [outgoing, setOutgoing] = useState<any[]>(() => friendsCache?.outgoing || []);
+  const [loading, setLoading] = useState(() => friendsCache === null);
   const [refreshing, setRefreshing] = useState(false);
+  const [networkError, setNetworkError] = useState(false);
 
   const load = useCallback(async () => {
     if (!token) return;
@@ -34,9 +42,25 @@ export default function Friends() {
         api<{ friends: any[] }>("/friends", { token }),
         api<{ incoming: any[]; outgoing: any[] }>("/friends/requests", { token }),
       ]);
-      setFriends(f.friends || []);
-      setIncoming(r.incoming || []);
-      setOutgoing(r.outgoing || []);
+
+      const nextFriends = f.friends || [];
+      const nextIncoming = r.incoming || [];
+      const nextOutgoing = r.outgoing || [];
+
+      setFriends(nextFriends);
+      setIncoming(nextIncoming);
+      setOutgoing(nextOutgoing);
+      setNetworkError(false);
+
+      friendsCache = {
+        friends: nextFriends,
+        incoming: nextIncoming,
+        outgoing: nextOutgoing,
+      };
+    } catch {
+      setTimeout(() => {
+        load();
+      }, 20000);
     } finally {
       setLoading(false);
     }
@@ -85,6 +109,28 @@ export default function Friends() {
         </View>
       </View>
 
+      {networkError ? (
+        <View
+          style={{
+            marginHorizontal: spacing.lg,
+            marginTop: spacing.sm,
+            paddingHorizontal: 14,
+            paddingVertical: 9,
+            borderRadius: radii.pill,
+            backgroundColor: colors.surface,
+            borderWidth: 1,
+            borderColor: colors.border,
+            flexDirection: "row",
+            alignItems: "center",
+          }}
+        >
+          <Feather name="wifi-off" size={15} color={colors.mutedFg} />
+          <NxText variant="caption" style={{ marginLeft: 8 }}>
+            No connection · Showing saved data
+          </NxText>
+        </View>
+      ) : null}
+
       {loading ? (
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
           <ActivityIndicator color={colors.primary} />
@@ -98,9 +144,18 @@ export default function Friends() {
           renderItem={({ item }) => (
             <View style={styles.row}>
               <TouchableOpacity style={{ flexDirection: "row", alignItems: "center", flex: 1 }} onPress={() => router.push(`/user/${item.user_id}`)}>
-                <Avatar uri={item.profile_picture} name={item.display_name} size={44} online={item.online} />
+                <Avatar
+                  uri={item.profile_picture}
+                  name={item.display_name}
+                  size={44}
+                  online={item.online}
+                  onlineStatus={item.online_status || "online"}
+                />
                 <View style={{ flex: 1, marginLeft: 14 }}>
-                  <NxText variant="titleSm">{item.display_name}</NxText>
+                  <View style={{ flexDirection: "row", alignItems: "center" }}>
+                <NxText variant="titleSm">{item.display_name}</NxText>
+                <VerifiedBadge badgeType={item.badge_type} size={16} />
+              </View>
                   <NxText variant="bodySm">@{item.username}</NxText>
                 </View>
               </TouchableOpacity>
@@ -127,7 +182,10 @@ export default function Friends() {
             <View key={r.request_id} style={styles.row}>
               <Avatar uri={r.user?.profile_picture} name={r.user?.display_name} size={44} />
               <View style={{ flex: 1, marginLeft: 14 }}>
-                <NxText variant="titleSm">{r.user?.display_name}</NxText>
+                <View style={{ flexDirection: "row", alignItems: "center" }}>
+                  <NxText variant="titleSm">{r.user?.display_name}</NxText>
+                  <VerifiedBadge badgeType={r.user?.badge_type} size={16} />
+                </View>
                 <NxText variant="bodySm">@{r.user?.username}</NxText>
               </View>
               <TouchableOpacity testID={`req-accept-${r.user?.username}`} onPress={() => accept(r.from_user)} style={[styles.smallBtn, { backgroundColor: colors.primary }]}>

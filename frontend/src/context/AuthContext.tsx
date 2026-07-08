@@ -11,12 +11,19 @@ export type User = {
   bio?: string;
   profile_picture?: string;
   cover_picture?: string;
+  birthday?: string | null;
+  birthday_visibility?: "private" | "public" | "bonds";
   is_private?: boolean;
   email_verified?: boolean;
   provider?: string;
   online?: boolean;
   last_seen?: string;
+  online_status?: "online" | "idle" | "dnd" | "invisible";
   badge_type?: string | null;
+  verified_since?: string | null;
+  status_text?: string | null;
+  status_expires_at?: string | null;
+  created_at?: string;
 };
 
 export type StoredAccount = {

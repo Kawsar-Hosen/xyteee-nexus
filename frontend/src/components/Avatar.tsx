@@ -17,12 +17,14 @@ export function Avatar({
   size = 44,
   ring,
   online,
+  onlineStatus = "online",
 }: {
   uri?: string;
   name?: string;
   size?: number;
   ring?: boolean;
   online?: boolean;
+  onlineStatus?: "online" | "idle" | "dnd" | "invisible";
 }) {
   const { colors } = useTheme();
   const outerSize = ring ? size + 6 : size;
@@ -59,7 +61,7 @@ export function Avatar({
       }}
     >
       {inner}
-      {online ? (
+      {online && onlineStatus !== "invisible" ? (
         <View
           style={{
             position: "absolute",
@@ -68,11 +70,29 @@ export function Avatar({
             width: size * 0.28,
             height: size * 0.28,
             borderRadius: (size * 0.28) / 2,
-            backgroundColor: colors.online,
+            backgroundColor:
+              onlineStatus === "idle"
+                ? "#F0B232"
+                : onlineStatus === "dnd"
+                ? "#F23F43"
+                : colors.online,
             borderWidth: 2,
             borderColor: colors.background,
+            alignItems: "center",
+            justifyContent: "center",
           }}
-        />
+        >
+          {onlineStatus === "dnd" ? (
+            <View
+              style={{
+                width: size * 0.13,
+                height: 3,
+                borderRadius: 2,
+                backgroundColor: colors.background,
+              }}
+            />
+          ) : null}
+        </View>
       ) : null}
     </View>
   );

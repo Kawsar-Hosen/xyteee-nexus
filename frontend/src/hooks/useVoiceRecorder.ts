@@ -1,11 +1,9 @@
-/**
- * useVoiceRecorder — NATIVE stub.
- * Full recording requires expo-audio to be installed.
- * On native without expo-audio the hook gracefully no-ops.
- * The web implementation (useVoiceRecorder.web.ts) is used for web builds.
- */
-import { useCallback, useState } from "react";
-import { Alert } from "react-native";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  AudioModule,
+  RecordingPresets,
+  useAudioRecorder,
+} from "expo-audio";
 
 export type RecordingState = "idle" | "recording" | "processing";
 
@@ -14,20 +12,97 @@ export type VoiceResult = {
   durationStr: string;
 };
 
-export function useVoiceRecorder() {
-  const [state] = useState<RecordingState>("idle");
-  const [elapsed] = useState(0);
+function fmtDuration(ms: number) {
+  const s = Math.floor(ms / 1000);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
 
-  const start = useCallback(async () => {
-    Alert.alert(
-      "Voice Messages",
-      "Voice recording is available in the full mobile build. Install expo-audio to enable this feature.",
-      [{ text: "OK" }]
-    );
+export function useVoiceRecorder() {
+  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const [state, setState] = useState<RecordingState>("idle");
+  const [elapsed, setElapsed] = useState(0);
+
+  const timerRef = useRef<any>(null);
+  const startMsRef = useRef(0);
+
+  const stopTimer = () => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    return () => stopTimer();
   }, []);
 
-  const stop = useCallback(async (): Promise<VoiceResult | null> => null, []);
-  const cancel = useCallback(async () => {}, []);
+  const start = useCallback(async () => {
+    const permission = await AudioModule.requestRecordingPermissionsAsync();
+
+    if (!permission.granted) return;
+
+    await AudioModule.setAudioModeAsync({
+      allowsRecording: true,
+      playsInSilentMode: true,
+    });
+
+    await recorder.prepareToRecordAsync();
+    recorder.record();
+
+    startMsRef.current = Date.now();
+    setElapsed(0);
+    setState("recording");
+
+    timerRef.current = setInterval(() => {
+      setElapsed(Date.now() - startMsRef.current);
+    }, 200);
+  }, [recorder]);
+
+  const stop = useCallback(async (): Promise<VoiceResult | null> => {
+    if (state !== "recording") return null;
+
+    stopTimer();
+    setState("processing");
+
+    const duration = Date.now() - startMsRef.current;
+
+    await recorder.stop();
+
+    const uri = recorder.uri;
+
+    await AudioModule.setAudioModeAsync({
+      allowsRecording: false,
+      playsInSilentMode: true,
+    });
+
+    setElapsed(0);
+    setState("idle");
+
+    if (!uri) return null;
+
+    return {
+      uri,
+      durationStr: fmtDuration(duration),
+    };
+  }, [recorder, state]);
+
+  const cancel = useCallback(async () => {
+    stopTimer();
+
+    if (state === "recording") {
+      try {
+        await recorder.stop();
+      } catch {}
+    }
+
+    await AudioModule.setAudioModeAsync({
+      allowsRecording: false,
+      playsInSilentMode: true,
+    });
+
+    setElapsed(0);
+    setState("idle");
+  }, [recorder, state]);
 
   return { state, elapsed, start, stop, cancel };
 }

@@ -25,7 +25,7 @@ else
   echo "[expo-go] REPLIT_DEV_DOMAIN not set — EXPO_PUBLIC_BACKEND_URL will be empty"
 fi
 
-cd /home/runner/workspace/frontend
+cd /data/data/com.termux/files/home/NexusTest/frontend
 
 echo "[expo-go] Starting Expo with tunnel (Expo Go compatible)..."
 echo "[expo-go] Scan the QR code that appears below with Expo Go."

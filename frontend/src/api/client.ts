@@ -33,13 +33,41 @@ export async function api<T = any>(path: string, opts: FetchOptions = {}): Promi
   const url = `${API_BASE}${path}${buildQuery(opts.query)}`;
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (opts.token) headers.Authorization = `Bearer ${opts.token}`;
-  const res = await fetch(url, {
-    method: opts.method || "GET",
-    headers,
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  });
+
+  let res: Response;
+
+  try {
+    res = await fetch(url, {
+      method: opts.method || "GET",
+      headers,
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+    });
+  } catch (error: any) {
+    const err: any = new Error(
+      error?.name === "AbortError"
+        ? "Connection timed out. Check your network."
+        : "Unable to connect. Check your network."
+    );
+    err.code = "NETWORK_ERROR";
+    throw err;
+  }
   const text = await res.text();
-  const data = text ? JSON.parse(text) : {};
+
+  let data: any = {};
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      const err: any = new Error(
+        res.ok
+          ? "Server returned an invalid response. Please try again."
+          : `Server error (${res.status}). Please try again.`
+      );
+      err.status = res.status;
+      err.rawResponse = text;
+      throw err;
+    }
+  }
   if (!res.ok) {
     const raw = data.detail;
     let msg: string;

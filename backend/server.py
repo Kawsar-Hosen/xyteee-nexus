@@ -25,6 +25,8 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
+from fastapi.openapi.docs import get_swagger_ui_html
+from fastapi.openapi.utils import get_openapi
 from starlette.middleware.cors import CORSMiddleware
 from supabase import create_client, Client
 from pydantic import BaseModel, EmailStr, Field
@@ -124,7 +126,15 @@ _HIDDEN = {"password_hash", "email_verify_token", "password_reset_token", "passw
 def public_user(u: Optional[dict]) -> Optional[dict]:
     if not u:
         return None
-    return {k: v for k, v in u.items() if k not in _HIDDEN}
+
+    data = {k: v for k, v in u.items() if k not in _HIDDEN}
+
+    status_expiry = parse_ts(data.get("status_expires_at"))
+    if status_expiry and status_expiry <= now_utc():
+        data["status_text"] = None
+        data["status_expires_at"] = None
+
+    return data
 
 
 async def get_user_public(user_id: str) -> Optional[dict]:
@@ -193,6 +203,22 @@ async def current_user(authorization: Optional[str] = Header(None)) -> dict:
     user = await get_user_public(user_id)
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
+
+    moderation_status = user.get("moderation_status") or "active"
+
+    if moderation_status in {"suspended", "banned"}:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "ACCOUNT_MODERATED",
+                "status": moderation_status,
+                "user_id": user.get("user_id"),
+                "reason": user.get("moderation_reason") or "No reason provided",
+                "reason_code": user.get("moderation_reason_code"),
+                "moderated_at": user.get("moderated_at"),
+            },
+        )
+
     return user
 
 
@@ -227,13 +253,25 @@ class Hub:
                 pass
 
     async def _broadcast_presence(self, user_id: str, online: bool):
+        ur = await run(lambda: sb.table("users")
+            .select("online_status")
+            .eq("user_id", user_id)
+            .limit(1).execute())
+        online_status = (
+            ur.data[0].get("online_status", "online")
+            if ur.data
+            else "online"
+        )
+        visible_online = online and online_status != "invisible"
+
         r = await run(lambda: sb.table("friendships").select("a,b")
             .or_(f"a.eq.{user_id},b.eq.{user_id}").execute())
         others = [f["a"] if f["b"] == user_id else f["b"] for f in r.data]
         payload = {
             "type": "presence",
             "user_id": user_id,
-            "online": online,
+            "online": visible_online,
+            "online_status": online_status if visible_online else "offline",
             "last_seen": ts(now_utc()),
         }
         for o in others:
@@ -283,7 +321,12 @@ class ProfileUpdate(BaseModel):
     bio: Optional[str] = None
     profile_picture: Optional[str] = None
     cover_picture: Optional[str] = None
+    birthday: Optional[str] = None
+    birthday_visibility: Optional[str] = None
     is_private: Optional[bool] = None
+    online_status: Optional[str] = None
+    status_text: Optional[str] = None
+    status_expires_at: Optional[str] = None
 
 
 class MessageIn(BaseModel):
@@ -312,6 +355,14 @@ class StoryIn(BaseModel):
     media: str
     caption: Optional[str] = ""
     is_private: bool = False
+    text_x: float = 0.08
+    text_y: float = 0.38
+    text_color: str = "#FFFFFF"
+    text_size: int = 28
+    font_index: int = 0
+    media_scale: float = 1.0
+    media_x: float = 0.0
+    media_y: float = 0.0
 
 
 class FriendActionIn(BaseModel):
@@ -337,6 +388,38 @@ async def _push_notification(to_user: str, kind: str, data: dict):
 
 
 # ── Auth ───────────────────────────────────────────────────────────────────────
+@api.get("/auth/check-username")
+async def check_username(username: str = Query(..., min_length=3, max_length=24)):
+    clean_username = username.strip().lower()
+
+    if not re.fullmatch(r"[a-z0-9._]+", clean_username):
+        return {
+            "available": False,
+            "valid": False,
+            "message": "Only letters, numbers, dots and underscores are allowed.",
+        }
+
+    r = await run(
+        lambda: sb.table("users")
+        .select("user_id")
+        .eq("username", clean_username)
+        .limit(1)
+        .execute()
+    )
+
+    available = not bool(r.data)
+
+    return {
+        "available": available,
+        "valid": True,
+        "message": (
+            "Username is available."
+            if available
+            else "This username is already taken."
+        ),
+    }
+
+
 @api.post("/auth/signup")
 async def signup(body: SignUpIn):
     email = body.email.lower()
@@ -379,12 +462,186 @@ async def login(body: LoginIn):
     u = r.data[0] if r.data else None
     if not u or not u.get("password_hash") or not verify_password(body.password, u["password_hash"]):
         raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    moderation_status = (u.get("moderation_status") or "active").lower()
+
+    if moderation_status == "suspended":
+        appeals_result = await run(
+            lambda: sb.table("appeals")
+            .select("appeal_id,status,created_at")
+            .eq("user_id", u["user_id"])
+            .order("created_at", desc=False)
+            .execute()
+        )
+
+        appeal_rows = appeals_result.data or []
+        appeal_count = len(appeal_rows)
+        pending_appeal = next(
+            (a for a in appeal_rows if a.get("status") == "pending"),
+            None,
+        )
+        appeals_remaining = max(0, 2 - appeal_count)
+
+        if pending_appeal:
+            appeal_status = "pending"
+            appeal_allowed = False
+        elif appeal_count >= 2:
+            appeal_status = "limit_reached"
+            appeal_allowed = False
+        else:
+            appeal_status = "eligible"
+            appeal_allowed = True
+
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "ACCOUNT_SUSPENDED",
+                "title": "Account Suspended",
+                "message": "Your account has been suspended.",
+                "reason": u.get("moderation_reason"),
+                "reason_code": u.get("moderation_reason_code"),
+                "user_id": u.get("user_id"),
+                "name": u.get("display_name"),
+                "email": u.get("email"),
+                "appeal_allowed": appeal_allowed,
+                "appeal_status": appeal_status,
+                "appeal_count": appeal_count,
+                "appeals_remaining": appeals_remaining,
+                "review_time": "24–72 hours" if pending_appeal else None,
+            },
+        )
+
+    if moderation_status == "banned":
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "ACCOUNT_BANNED",
+                "title": "Account Permanently Disabled",
+                "message": "Your account has been permanently disabled.",
+                "reason": u.get("moderation_reason"),
+                "reason_code": u.get("moderation_reason_code"),
+                "user_id": u.get("user_id"),
+                "appeal_allowed": False,
+            },
+        )
+
     await run(lambda: sb.table("users")
         .update({"online": True, "last_seen": ts(now_utc())})
         .eq("user_id", u["user_id"]).execute())
     token = create_jwt(u["user_id"])
     user = await get_user_public(u["user_id"])
     return {"token": token, "user": user}
+
+
+class AppealSubmitIn(BaseModel):
+    user_id: str
+    message: str = Field(min_length=5, max_length=1000)
+
+
+@api.post("/auth/appeal")
+async def submit_appeal(body: AppealSubmitIn):
+    message = body.message.strip()
+    if len(message) < 5:
+        raise HTTPException(
+            status_code=400,
+            detail="Please write a little more about your appeal",
+        )
+
+    r = await run(
+        lambda: sb.table("users")
+        .select(
+            "user_id,email,display_name,moderation_status,"
+            "moderation_reason"
+        )
+        .eq("user_id", body.user_id)
+        .execute()
+    )
+
+    if not r.data:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    u = r.data[0]
+
+    if (u.get("moderation_status") or "active") != "suspended":
+        raise HTTPException(
+            status_code=400,
+            detail="This account is not eligible to submit an appeal",
+        )
+
+    appeals = await run(
+        lambda: sb.table("appeals")
+        .select("appeal_id,status,created_at")
+        .eq("user_id", u["user_id"])
+        .order("created_at", desc=False)
+        .execute()
+    )
+
+    appeal_rows = appeals.data or []
+    pending_appeal = next(
+        (a for a in appeal_rows if a.get("status") == "pending"),
+        None,
+    )
+
+    if pending_appeal:
+        return {
+            "ok": True,
+            "already_submitted": True,
+            "status": "pending",
+            "appeal_count": len(appeal_rows),
+            "appeals_remaining": max(0, 2 - len(appeal_rows)),
+            "message": (
+                "Your appeal is already under review. "
+                "Reviews usually take 24–72 hours."
+            ),
+        }
+
+    if len(appeal_rows) >= 2:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "APPEAL_LIMIT_REACHED",
+                "title": "Appeal Limit Reached",
+                "message": (
+                    "You have used both available appeals. "
+                    "No further appeals can be submitted."
+                ),
+                "appeal_count": len(appeal_rows),
+                "appeals_remaining": 0,
+            },
+        )
+
+    if appeal_rows and appeal_rows[-1].get("status") != "rejected":
+        raise HTTPException(
+            status_code=400,
+            detail="A new appeal cannot be submitted at this time",
+        )
+
+    appeal_id = make_id("apl")
+    created_at = ts(now_utc())
+
+    await run(
+        lambda: sb.table("appeals").insert({
+            "appeal_id": appeal_id,
+            "user_id": u["user_id"],
+            "name": u.get("display_name") or "",
+            "email": u.get("email") or "",
+            "message": message,
+            "suspension_reason": u.get("moderation_reason"),
+            "status": "pending",
+            "created_at": created_at,
+        }).execute()
+    )
+
+    return {
+        "ok": True,
+        "already_submitted": False,
+        "appeal_id": appeal_id,
+        "status": "pending",
+        "message": (
+            "Thank you. We have received your appeal and your account "
+            "will be reviewed. Reviews usually take 24–72 hours."
+        ),
+    }
 
 
 @api.get("/auth/me")
@@ -469,14 +726,114 @@ async def search_users(q: str = Query(""), user=Depends(current_user)):
         .or_(f"username.ilike.%{q}%,display_name.ilike.%{q}%")
         .neq("user_id", user["user_id"])
         .limit(20).execute())
-    return {"users": [public_user(u) for u in r.data]}
+    users = []
+    for u in (r.data or []):
+        if not await users_blocked(user["user_id"], u["user_id"]):
+            users.append(public_user(u))
+    return {"users": users}
+
+
+@api.get("/users/recent")
+async def recent_users(user=Depends(current_user)):
+    cutoff = ts(now_utc() - timedelta(days=15))
+
+    fr = await run(lambda: sb.table("friendships").select("a,b")
+        .or_(f"a.eq.{user['user_id']},b.eq.{user['user_id']}").execute())
+    excluded = {
+        f["a"] if f["b"] == user["user_id"] else f["b"]
+        for f in (fr.data or [])
+    }
+
+    rq = await run(lambda: sb.table("friend_requests").select("from_user,to_user")
+        .eq("status", "pending")
+        .or_(f"from_user.eq.{user['user_id']},to_user.eq.{user['user_id']}").execute())
+    for x in (rq.data or []):
+        excluded.add(
+            x["to_user"] if x["from_user"] == user["user_id"] else x["from_user"]
+        )
+
+    r = await run(lambda: sb.table("users").select("*")
+        .gte("created_at", cutoff)
+        .neq("user_id", user["user_id"])
+        .order("created_at", desc=True).execute())
+
+    seen = set()
+    users = []
+    for u in (r.data or []):
+        uid = u.get("user_id")
+        if (
+            uid
+            and uid not in seen
+            and uid not in excluded
+            and not await users_blocked(user["user_id"], uid)
+        ):
+            seen.add(uid)
+            users.append(public_user(u))
+
+    return {"users": users}
+
+
+@api.get("/users/discover-more")
+async def discover_more_users(user=Depends(current_user)):
+    cutoff = ts(now_utc() - timedelta(days=15))
+
+    fr = await run(lambda: sb.table("friendships").select("a,b")
+        .or_(f"a.eq.{user['user_id']},b.eq.{user['user_id']}").execute())
+    excluded = {
+        f["a"] if f["b"] == user["user_id"] else f["b"]
+        for f in (fr.data or [])
+    }
+
+    rq = await run(lambda: sb.table("friend_requests").select("from_user,to_user")
+        .eq("status", "pending")
+        .or_(f"from_user.eq.{user['user_id']},to_user.eq.{user['user_id']}").execute())
+    for x in (rq.data or []):
+        excluded.add(
+            x["to_user"] if x["from_user"] == user["user_id"] else x["from_user"]
+        )
+
+    r = await run(lambda: sb.table("users").select("*")
+        .lt("created_at", cutoff)
+        .neq("user_id", user["user_id"])
+        .order("created_at", desc=True).execute())
+
+    seen = set()
+    users = []
+    for u in (r.data or []):
+        uid = u.get("user_id")
+        if (
+            uid
+            and uid not in seen
+            and uid not in excluded
+            and not await users_blocked(user["user_id"], uid)
+        ):
+            seen.add(uid)
+            users.append(public_user(u))
+
+    return {"users": users}
 
 
 @api.get("/users/{user_id}")
 async def get_user(user_id: str, user=Depends(current_user)):
+    if user_id != user["user_id"]:
+        await ensure_not_blocked(user["user_id"], user_id)
+
     u = await get_user_public(user_id)
     if not u:
         raise HTTPException(status_code=404, detail="Not found")
+
+    # Real private-account access:
+    # owner and accepted bonds can see private content
+    private_locked = False
+    if user_id != user["user_id"] and u.get("is_private"):
+        pa, pb = sorted([user["user_id"], user_id])
+        private_friend = await run(lambda: sb.table("friendships")
+            .select("friendship_id")
+            .eq("a", pa).eq("b", pb)
+            .limit(1).execute())
+        private_locked = not bool(private_friend.data)
+
+    u["private_locked"] = private_locked
 
     # friend + story counts
     a_s, b_s = sorted([user_id, user_id])  # placeholder, real query below
@@ -485,7 +842,33 @@ async def get_user(user_id: str, user=Depends(current_user)):
     sc = await run(lambda: sb.table("stories").select("story_id", count="exact")
         .eq("user_id", user_id).gt("expires_at", ts(now_utc())).execute())
     u["friend_count"] = fc.count or 0
-    u["story_count"] = sc.count or 0
+    u["story_count"] = 0 if private_locked else (sc.count or 0)
+
+    # mutual bonds between current user and profile user
+    my_fr = await run(lambda: sb.table("friendships").select("a,b")
+        .or_(f"a.eq.{user['user_id']},b.eq.{user['user_id']}").execute())
+    their_fr = await run(lambda: sb.table("friendships").select("a,b")
+        .or_(f"a.eq.{user_id},b.eq.{user_id}").execute())
+
+    my_bonds = {
+        f["a"] if f["b"] == user["user_id"] else f["b"]
+        for f in (my_fr.data or [])
+    }
+    their_bonds = {
+        f["a"] if f["b"] == user_id else f["b"]
+        for f in (their_fr.data or [])
+    }
+
+    mutual_ids = list(my_bonds & their_bonds)
+    mutual_users = []
+
+    if mutual_ids:
+        mur = await run(lambda: sb.table("users").select("*")
+            .in_("user_id", mutual_ids).execute())
+        mutual_users = [public_user(x) for x in (mur.data or [])]
+
+    u["mutual_bonds_count"] = len(mutual_ids)
+    u["mutual_bonds_preview"] = mutual_users[:3]
 
     # relation to the caller
     if user_id != user["user_id"]:
@@ -508,15 +891,115 @@ async def get_user(user_id: str, user=Depends(current_user)):
         if bl.data:
             rel = "blocked"
         u["relation"] = rel
+
+        birthday_visibility = u.get("birthday_visibility") or "private"
+        if birthday_visibility == "private":
+            u["birthday"] = None
+        elif birthday_visibility == "bonds" and rel != "friend":
+            u["birthday"] = None
+
     return u
 
 
 @api.put("/users/me")
 async def update_me(body: ProfileUpdate, user=Depends(current_user)):
     upd = {k: v for k, v in body.dict().items() if v is not None}
+
+    if "birthday" in upd:
+        try:
+            birthday_value = datetime.strptime(upd["birthday"], "%Y-%m-%d").date()
+        except (ValueError, TypeError):
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid birthday date",
+            )
+
+        if birthday_value > now_utc().date():
+            raise HTTPException(
+                status_code=400,
+                detail="Birthday cannot be in the future",
+            )
+
+    if "birthday_visibility" in upd:
+        valid_birthday_visibilities = {"private", "public", "bonds"}
+        if upd["birthday_visibility"] not in valid_birthday_visibilities:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid birthday visibility",
+            )
+
+    if "online_status" in upd:
+        valid_online_statuses = {"online", "idle", "dnd", "invisible"}
+        if upd["online_status"] not in valid_online_statuses:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid online status",
+            )
+
+    if "status_text" in body.__fields_set__:
+        status = (body.status_text or "").strip()
+
+        if len(status) > 128:
+            raise HTTPException(
+                status_code=400,
+                detail="Status must be 128 characters or less",
+            )
+
+        if status:
+            upd["status_text"] = status
+            upd["status_expires_at"] = body.status_expires_at
+        else:
+            upd["status_text"] = None
+            upd["status_expires_at"] = None
+
     if upd:
         await run(lambda: sb.table("users").update(upd).eq("user_id", user["user_id"]).execute())
+
+    if "online_status" in upd:
+        is_connected = bool(hub.connections.get(user["user_id"]))
+        await hub._broadcast_presence(
+            user["user_id"],
+            is_connected,
+        )
+
     return await get_user_public(user["user_id"])
+
+
+# ── Block protection ───────────────────────────────────────────────────────────
+async def users_blocked(a: str, b: str) -> bool:
+    r = await run(lambda: sb.table("blocks").select("blocker")
+        .or_(
+            f"and(blocker.eq.{a},blocked.eq.{b}),"
+            f"and(blocker.eq.{b},blocked.eq.{a})"
+        ).limit(1).execute())
+    return bool(r.data)
+
+
+async def ensure_private_access(viewer_id: str, owner_id: str):
+    if viewer_id == owner_id:
+        return
+
+    ur = await run(lambda: sb.table("users")
+        .select("is_private")
+        .eq("user_id", owner_id)
+        .limit(1).execute())
+
+    if not ur.data or not ur.data[0].get("is_private"):
+        return
+
+    fa, fb = sorted([viewer_id, owner_id])
+    fr = await run(lambda: sb.table("friendships")
+        .select("friendship_id")
+        .eq("a", fa).eq("b", fb)
+        .limit(1).execute())
+
+    if not fr.data:
+        raise HTTPException(status_code=404, detail="Not found")
+
+
+async def ensure_not_blocked(a: str, b: str):
+    if await users_blocked(a, b):
+        raise HTTPException(status_code=404, detail="User not found")
 
 
 # ── Friends ────────────────────────────────────────────────────────────────────
@@ -525,6 +1008,9 @@ async def friend_request(body: FriendActionIn, user=Depends(current_user)):
     target = body.user_id
     if target == user["user_id"]:
         raise HTTPException(status_code=400, detail="Cannot friend self")
+
+    await ensure_not_blocked(user["user_id"], target)
+
     exists = await run(lambda: sb.table("users").select("user_id").eq("user_id", target).execute())
     if not exists.data:
         raise HTTPException(status_code=404, detail="Not found")
@@ -560,6 +1046,8 @@ async def friend_request(body: FriendActionIn, user=Depends(current_user)):
 
 @api.post("/friends/accept")
 async def friend_accept(body: FriendActionIn, user=Depends(current_user)):
+    await ensure_not_blocked(user["user_id"], body.user_id)
+
     r = await run(lambda: sb.table("friend_requests").select("*")
         .eq("from_user", body.user_id).eq("to_user", user["user_id"]).eq("status", "pending").execute())
     if not r.data:
@@ -689,6 +1177,8 @@ def _conv_id_for(a: str, b: str) -> str:
 @api.post("/chats/open")
 async def open_chat(body: FriendActionIn, user=Depends(current_user)):
     other = body.user_id
+    await ensure_not_blocked(user["user_id"], other)
+
     r = await run(lambda: sb.table("users").select("user_id").eq("user_id", other).execute())
     if not r.data:
         raise HTTPException(status_code=404, detail="Not found")
@@ -719,6 +1209,10 @@ async def list_chats(user=Depends(current_user)):
         if not other_ids:
             continue
         other = other_ids[0]
+
+        if await users_blocked(user["user_id"], other):
+            continue
+
         ur = await run(lambda: sb.table("users").select("*").eq("user_id", other).execute())
         other_user = public_user(ur.data[0]) if ur.data else None
         # unread: messages in this conv not from me, not in my read_by
@@ -733,7 +1227,11 @@ async def list_chats(user=Depends(current_user)):
         )
         c["other_user"] = other_user
         c["unread"] = unread
-        out.append(c)
+
+        # Keep only the newest conversation for each user
+        if not any(x.get("other_user", {}).get("user_id") == other for x in out):
+            out.append(c)
+
     return {"chats": out}
 
 
@@ -748,6 +1246,10 @@ async def list_messages(
         .eq("conversation_id", conversation_id).execute())
     if not cr.data or user["user_id"] not in cr.data[0]["participants"]:
         raise HTTPException(status_code=404, detail="Not found")
+
+    other_ids = [p for p in cr.data[0]["participants"] if p != user["user_id"]]
+    for other in other_ids:
+        await ensure_not_blocked(user["user_id"], other)
 
     qb = (sb.table("messages").select("*")
           .eq("conversation_id", conversation_id)
@@ -774,6 +1276,12 @@ async def list_messages(
             mid = msg["message_id"]
             await run(lambda: sb.table("messages").update({"read_by": new_rb}).eq("message_id", mid).execute())
             msg["read_by"] = new_rb
+            await broadcast_to_user(msg["sender_id"], {
+                "type": "message_read",
+                "conversation_id": conversation_id,
+                "message_id": mid,
+                "read_by": new_rb,
+            })
 
     return {"messages": visible}
 
@@ -785,8 +1293,12 @@ async def send_message(body: MessageIn, user=Depends(current_user)):
     if not cr.data or user["user_id"] not in cr.data[0]["participants"]:
         raise HTTPException(status_code=404, detail="Not found")
     conv = cr.data[0]
-    msg_id = make_id("msg")
     other_ids = [p for p in conv["participants"] if p != user["user_id"]]
+
+    for other in other_ids:
+        await ensure_not_blocked(user["user_id"], other)
+
+    msg_id = make_id("msg")
     msg = {
         "message_id": msg_id,
         "conversation_id": body.conversation_id,
@@ -869,6 +1381,11 @@ async def search_messages(conversation_id: str, q: str, user=Depends(current_use
         .eq("conversation_id", conversation_id).execute())
     if not cr.data or user["user_id"] not in cr.data[0]["participants"]:
         raise HTTPException(status_code=404, detail="Not found")
+
+    other_ids = [p for p in cr.data[0]["participants"] if p != user["user_id"]]
+    for other in other_ids:
+        await ensure_not_blocked(user["user_id"], other)
+
     mr = await run(lambda: sb.table("messages").select("*")
         .eq("conversation_id", conversation_id)
         .eq("deleted_for_everyone", False)
@@ -888,6 +1405,10 @@ async def react_message(message_id: str, body: ReactionIn, user=Depends(current_
         .eq("conversation_id", msg["conversation_id"]).execute())
     if not cr.data or user["user_id"] not in cr.data[0]["participants"]:
         raise HTTPException(status_code=403, detail="Not allowed")
+
+    other_ids = [p for p in cr.data[0]["participants"] if p != user["user_id"]]
+    for other in other_ids:
+        await ensure_not_blocked(user["user_id"], other)
 
     reactions: list = list(msg.get("reactions") or [])
     existing = next((r for r in reactions if r.get("user_id") == user["user_id"]), None)
@@ -938,6 +1459,10 @@ async def delete_account(body: DeleteAccountIn, user=Depends(current_user)):
     return {"ok": True}
 
 
+class StoryReactionIn(BaseModel):
+    emoji: str
+
+
 # ── Stories ────────────────────────────────────────────────────────────────────
 @api.post("/stories")
 async def create_story(body: StoryIn, user=Depends(current_user)):
@@ -949,6 +1474,14 @@ async def create_story(body: StoryIn, user=Depends(current_user)):
         "media": body.media,
         "caption": body.caption or "",
         "is_private": body.is_private,
+        "text_x": max(0.0, min(1.0, body.text_x)),
+        "text_y": max(0.0, min(1.0, body.text_y)),
+        "text_color": body.text_color,
+        "text_size": max(12, min(72, body.text_size)),
+        "font_index": max(0, min(9, body.font_index)),
+        "media_scale": max(0.5, min(5.0, body.media_scale)),
+        "media_x": max(-2.0, min(2.0, body.media_x)),
+        "media_y": max(-2.0, min(2.0, body.media_y)),
         "viewers": [],
         "created_at": ts(now_utc()),
         "expires_at": ts(now_utc() + timedelta(hours=24)),
@@ -967,29 +1500,61 @@ async def create_story(body: StoryIn, user=Depends(current_user)):
 
 @api.get("/stories/feed")
 async def stories_feed(user=Depends(current_user)):
-    fr = await run(lambda: sb.table("friendships").select("a,b")
-        .or_(f"a.eq.{user['user_id']},b.eq.{user['user_id']}").execute())
-    ids = [f["a"] if f["b"] == user["user_id"] else f["b"] for f in fr.data]
-    ids.append(user["user_id"])
+    me = user["user_id"]
 
+    # Accepted bonds
+    fr = await run(lambda: sb.table("friendships").select("a,b")
+        .or_(f"a.eq.{me},b.eq.{me}").execute())
+    friend_ids = {
+        f["a"] if f["b"] == me else f["b"]
+        for f in (fr.data or [])
+    }
+
+    # All active stories:
+    # - my own stories
+    # - public stories from anyone
+    # - private stories only from accepted bonds
     sr = await run(lambda: sb.table("stories").select("*")
-        .in_("user_id", ids)
         .gt("expires_at", ts(now_utc()))
         .order("created_at", desc=True).execute())
 
     by_user: Dict[str, List[dict]] = {}
-    for s in sr.data:
-        by_user.setdefault(s["user_id"], []).append(s)
+
+    for story in (sr.data or []):
+        owner_id = story["user_id"]
+
+        if owner_id != me and await users_blocked(me, owner_id):
+            continue
+
+        allowed = (
+            owner_id == me
+            or not story.get("is_private", False)
+            or owner_id in friend_ids
+        )
+
+        if allowed:
+            by_user.setdefault(owner_id, []).append(story)
 
     uid_list = list(by_user.keys())
     if not uid_list:
         return {"feed": []}
 
-    ur = await run(lambda: sb.table("users").select("*").in_("user_id", uid_list).execute())
-    umap = {u["user_id"]: public_user(u) for u in ur.data}
+    ur = await run(lambda: sb.table("users").select("*")
+        .in_("user_id", uid_list).execute())
+    umap = {u["user_id"]: public_user(u) for u in (ur.data or [])}
 
-    out = [{"user": umap.get(uid), "stories": stories_} for uid, stories_ in by_user.items()]
-    out.sort(key=lambda x: (0 if x["user"] and x["user"]["user_id"] == user["user_id"] else 1, -len(x["stories"])))
+    out = [
+        {"user": umap.get(uid), "stories": stories_}
+        for uid, stories_ in by_user.items()
+        if umap.get(uid)
+    ]
+
+    out.sort(
+        key=lambda x: (
+            0 if x["user"]["user_id"] == me else 1,
+            -len(x["stories"])
+        )
+    )
     return {"feed": out}
 
 
@@ -999,6 +1564,11 @@ async def view_story(story_id: str, user=Depends(current_user)):
     if not sr.data:
         raise HTTPException(status_code=404, detail="Not found")
     s = sr.data[0]
+
+    if s["user_id"] != user["user_id"]:
+        await ensure_not_blocked(user["user_id"], s["user_id"])
+        await ensure_private_access(user["user_id"], s["user_id"])
+
     viewers: list = list(s.get("viewers") or [])
     if user["user_id"] != s["user_id"] and not any(v.get("user_id") == user["user_id"] for v in viewers):
         viewers.append({"user_id": user["user_id"], "viewed_at": ts(now_utc())})
@@ -1018,7 +1588,25 @@ async def story_viewers(story_id: str, user=Depends(current_user)):
         return {"viewers": [], "count": 0}
     ur = await run(lambda: sb.table("users").select("*").in_("user_id", ids).execute())
     umap = {u["user_id"]: public_user(u) for u in ur.data}
-    viewers = [{"user": umap.get(v["user_id"]), "viewed_at": v["viewed_at"]} for v in viewers_raw]
+    viewers = []
+    for v in viewers_raw:
+        viewer_id = v.get("user_id")
+        viewer_user = umap.get(viewer_id)
+
+        if not viewer_id or not viewer_user:
+            continue
+
+        if await users_blocked(user["user_id"], viewer_id):
+            continue
+
+        viewers.append({
+            "user": viewer_user,
+            "viewed_at": v.get("viewed_at"),
+            "reaction": v.get("reaction"),
+            "reactions": v.get("reactions") or ([v.get("reaction")] if v.get("reaction") else []),
+            "reacted_at": v.get("reacted_at"),
+        })
+
     return {"viewers": viewers, "count": len(viewers)}
 
 
@@ -1037,19 +1625,50 @@ class StoryReactBody(BaseModel):
 
 @api.post("/stories/{story_id}/react")
 async def react_to_story(story_id: str, body: StoryReactBody, user=Depends(current_user)):
-    sr = await run(lambda: sb.table("stories").select("story_id,user_id").eq("story_id", story_id).execute())
+    sr = await run(lambda: sb.table("stories").select("*").eq("story_id", story_id).execute())
     if not sr.data:
         raise HTTPException(status_code=404, detail="Not found")
-    owner_id = sr.data[0]["user_id"]
-    # Broadcast ephemeral reaction event to the story owner via WebSocket
-    await broadcast_to_user(owner_id, {
+
+    story = sr.data[0]
+
+    if story["user_id"] != user["user_id"]:
+        await ensure_not_blocked(user["user_id"], story["user_id"])
+        await ensure_private_access(user["user_id"], story["user_id"])
+
+    viewers = list(story.get("viewers") or [])
+    found = False
+
+    for viewer in viewers:
+        if viewer.get("user_id") == user["user_id"]:
+            reactions = list(viewer.get("reactions") or [])
+            if len(reactions) < 5:
+                reactions.append(body.emoji)
+            viewer["reactions"] = reactions
+            viewer["reaction"] = reactions[0] if reactions else None
+            viewer["reacted_at"] = ts(now_utc())
+            found = True
+            break
+
+    if not found:
+        viewers.append({
+            "user_id": user["user_id"],
+            "viewed_at": ts(now_utc()),
+            "reactions": [body.emoji],
+            "reaction": body.emoji,
+            "reacted_at": ts(now_utc()),
+        })
+
+    await run(lambda: sb.table("stories").update({"viewers": viewers}).eq("story_id", story_id).execute())
+
+    await broadcast_to_user(story["user_id"], {
         "type": "story_react",
         "story_id": story_id,
         "emoji": body.emoji,
         "from_user_id": user["user_id"],
         "from_name": user.get("display_name", ""),
     })
-    return {"ok": True}
+
+    return {"ok": True, "reaction": body.emoji}
 
 
 # ── Notifications ──────────────────────────────────────────────────────────────
@@ -1058,7 +1677,32 @@ async def list_notifications(user=Depends(current_user)):
     r = await run(lambda: sb.table("notifications").select("*")
         .eq("user_id", user["user_id"])
         .order("created_at", desc=True).limit(100).execute())
-    return {"notifications": r.data}
+
+    notifications = r.data or []
+    sender_ids = list({
+        n.get("data", {}).get("from")
+        for n in notifications
+        if n.get("data", {}).get("from")
+    })
+
+    users_map = {}
+    if sender_ids:
+        ur = await run(lambda: sb.table("users")
+            .select("user_id,username,display_name,profile_picture,badge_type")
+            .in_("user_id", sender_ids).execute())
+        users_map = {u["user_id"]: u for u in (ur.data or [])}
+
+    visible_notifications = []
+    for n in notifications:
+        sender_id = n.get("data", {}).get("from")
+
+        if sender_id and await users_blocked(user["user_id"], sender_id):
+            continue
+
+        n["sender"] = users_map.get(sender_id)
+        visible_notifications.append(n)
+
+    return {"notifications": visible_notifications}
 
 
 @api.post("/notifications/read")
@@ -1179,7 +1823,8 @@ async def admin_get_user(
     """Get full (public) details for any user (admin)."""
     r = await run(lambda: sb.table("users").select(
         "user_id,email,username,display_name,profile_picture,cover_picture,bio,"
-        "badge_type,online,last_seen,created_at,email_verified,is_private,provider"
+        "badge_type,online,last_seen,created_at,email_verified,is_private,provider,"
+        "moderation_status,moderation_reason,moderation_reason_code,moderated_at"
     ).eq("user_id", user_id).execute())
     if not r.data:
         raise HTTPException(status_code=404, detail="User not found")
@@ -1221,8 +1866,275 @@ async def admin_set_badge(
     ur = await run(lambda: sb.table("users").select("user_id").eq("user_id", user_id).execute())
     if not ur.data:
         raise HTTPException(status_code=404, detail="User not found")
-    await run(lambda: sb.table("users").update({"badge_type": badge}).eq("user_id", user_id).execute())
-    return {"ok": True, "badge_type": badge}
+    badge_update = {
+        "badge_type": badge,
+        "verified_since": ts(now_utc()) if badge is not None else None,
+    }
+    await run(lambda: sb.table("users").update(badge_update).eq("user_id", user_id).execute())
+    return {"ok": True, "badge_type": badge, "verified_since": badge_update["verified_since"]}
+
+
+
+ADMIN_MODERATION_REASONS = {
+    "spam_abuse": "Spam or abusive activity",
+    "harassment": "Harassment or harmful behavior",
+    "community_violation": "Violation of Nexus community rules",
+}
+
+
+class AdminModerationBody(BaseModel):
+    reason_code: Optional[str] = None
+    custom_reason: Optional[str] = None
+
+
+async def admin_moderate_user(
+    user_id: str,
+    status: str,
+    body: AdminModerationBody,
+    admin: dict,
+):
+    if user_id == admin["user_id"]:
+        raise HTTPException(
+            status_code=400,
+            detail="Admin cannot suspend or ban their own account",
+        )
+
+    ur = await run(
+        lambda: sb.table("users")
+        .select("user_id,username,display_name,moderation_status")
+        .eq("user_id", user_id)
+        .execute()
+    )
+    if not ur.data:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    reason_code = (body.reason_code or "").strip() or None
+    custom_reason = (body.custom_reason or "").strip()
+
+    if reason_code and reason_code not in ADMIN_MODERATION_REASONS:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "Invalid reason_code",
+                "valid_reasons": ADMIN_MODERATION_REASONS,
+            },
+        )
+
+    reason = custom_reason or (
+        ADMIN_MODERATION_REASONS.get(reason_code)
+        if reason_code
+        else None
+    )
+
+    if not reason:
+        raise HTTPException(
+            status_code=400,
+            detail="Choose a reason_code or provide custom_reason",
+        )
+
+    update = {
+        "moderation_status": status,
+        "moderation_reason": reason,
+        "moderation_reason_code": reason_code or "custom",
+        "moderated_at": ts(now_utc()),
+        "moderated_by": admin["user_id"],
+        "online": False,
+    }
+
+    await run(
+        lambda: sb.table("users")
+        .update(update)
+        .eq("user_id", user_id)
+        .execute()
+    )
+
+    return {
+        "ok": True,
+        "user_id": user_id,
+        "status": status,
+        "reason": reason,
+        "reason_code": update["moderation_reason_code"],
+        "moderated_at": update["moderated_at"],
+    }
+
+
+@api.get("/admin/moderation/reasons", tags=["Admin Moderation"])
+async def admin_moderation_reasons(
+    _admin: dict = Depends(require_admin),
+):
+    """Show the 3 predefined moderation reasons."""
+    return {"reasons": ADMIN_MODERATION_REASONS}
+
+
+@api.put("/admin/users/{user_id}/suspend", tags=["Admin Moderation"])
+async def admin_suspend_user(
+    user_id: str,
+    body: AdminModerationBody,
+    admin: dict = Depends(require_admin),
+):
+    """Suspend a user until an admin restores the account."""
+    return await admin_moderate_user(
+        user_id, "suspended", body, admin
+    )
+
+
+@api.put("/admin/users/{user_id}/ban", tags=["Admin Moderation"])
+async def admin_ban_user(
+    user_id: str,
+    body: AdminModerationBody,
+    admin: dict = Depends(require_admin),
+):
+    """Ban a user until an admin restores the account."""
+    return await admin_moderate_user(
+        user_id, "banned", body, admin
+    )
+
+
+@api.put("/admin/users/{user_id}/restore", tags=["Admin Moderation"])
+async def admin_restore_user(
+    user_id: str,
+    admin: dict = Depends(require_admin),
+):
+    """Remove suspension or ban and restore normal account access."""
+    ur = await run(
+        lambda: sb.table("users")
+        .select("user_id,moderation_status")
+        .eq("user_id", user_id)
+        .execute()
+    )
+    if not ur.data:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    await run(
+        lambda: sb.table("users")
+        .update({
+            "moderation_status": "active",
+            "moderation_reason": None,
+            "moderation_reason_code": None,
+            "moderated_at": None,
+            "moderated_by": admin["user_id"],
+        })
+        .eq("user_id", user_id)
+        .execute()
+    )
+
+    reviewed_at = ts(now_utc())
+
+    await run(
+        lambda: sb.table("appeals")
+        .update({
+            "status": "approved",
+            "reviewed_at": reviewed_at,
+            "reviewed_by": admin["user_id"],
+        })
+        .eq("user_id", user_id)
+        .eq("status", "pending")
+        .execute()
+    )
+
+    return {
+        "ok": True,
+        "user_id": user_id,
+        "status": "active",
+        "message": "Account restored successfully",
+    }
+
+
+@api.get("/admin/users/{user_id}/appeals", tags=["Admin Appeals"])
+async def admin_get_user_appeals(
+    user_id: str,
+    _admin: dict = Depends(require_admin),
+):
+    r = await run(
+        lambda: sb.table("appeals")
+        .select(
+            "appeal_id,user_id,name,email,message,suspension_reason,"
+            "status,created_at,reviewed_at,reviewed_by"
+        )
+        .eq("user_id", user_id)
+        .order("created_at", desc=True)
+        .execute()
+    )
+
+    appeals = r.data or []
+
+    return {
+        "appeals": appeals,
+        "total": len(appeals),
+        "pending": next(
+            (a for a in appeals if a.get("status") == "pending"),
+            None,
+        ),
+        "appeals_remaining": max(0, 2 - len(appeals)),
+    }
+
+
+@api.put("/admin/appeals/{appeal_id}/reject", tags=["Admin Appeals"])
+async def admin_reject_appeal(
+    appeal_id: str,
+    admin: dict = Depends(require_admin),
+):
+    r = await run(
+        lambda: sb.table("appeals")
+        .select("appeal_id,user_id,status")
+        .eq("appeal_id", appeal_id)
+        .execute()
+    )
+
+    if not r.data:
+        raise HTTPException(status_code=404, detail="Appeal not found")
+
+    appeal = r.data[0]
+
+    if appeal.get("status") != "pending":
+        raise HTTPException(
+            status_code=400,
+            detail="Only a pending appeal can be rejected",
+        )
+
+    reviewed_at = ts(now_utc())
+
+    await run(
+        lambda: sb.table("appeals")
+        .update({
+            "status": "rejected",
+            "reviewed_at": reviewed_at,
+            "reviewed_by": admin["user_id"],
+        })
+        .eq("appeal_id", appeal_id)
+        .execute()
+    )
+
+    return {
+        "ok": True,
+        "appeal_id": appeal_id,
+        "user_id": appeal["user_id"],
+        "status": "rejected",
+        "reviewed_at": reviewed_at,
+        "message": "Appeal rejected",
+    }
+
+
+@api.get("/admin/users/{user_id}/moderation", tags=["Admin Moderation"])
+async def admin_get_user_moderation(
+    user_id: str,
+    _admin: dict = Depends(require_admin),
+):
+    """View a user's current moderation status and reason."""
+    r = await run(
+        lambda: sb.table("users")
+        .select(
+            "user_id,username,display_name,moderation_status,"
+            "moderation_reason,moderation_reason_code,"
+            "moderated_at,moderated_by"
+        )
+        .eq("user_id", user_id)
+        .execute()
+    )
+    if not r.data:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    return {"moderation": r.data[0]}
 
 
 # ── Startup ────────────────────────────────────────────────────────────────────
@@ -1255,7 +2167,36 @@ async def root():
     return {"app": "XYTEEE Nexus", "ok": True}
 
 
-app.include_router(api)
+@app.get("/admin/openapi.json", include_in_schema=False)
+async def admin_openapi():
+    admin_routes = [
+        route
+        for route in app.routes
+        if getattr(route, "path", "").startswith("/api/admin/")
+    ]
+
+    return get_openapi(
+        title="XYTEEE Nexus Admin Panel",
+        version="1.0.0",
+        description="Private administration controls for XYTEEE Nexus.",
+        routes=admin_routes,
+    )
+
+
+@app.get("/admin/docs", include_in_schema=False)
+async def admin_swagger_docs():
+    return get_swagger_ui_html(
+        openapi_url="/admin/openapi.json",
+        title="XYTEEE Nexus Admin Panel",
+        swagger_ui_parameters={
+            "persistAuthorization": True,
+            "displayRequestDuration": True,
+            "filter": True,
+            "tryItOutEnabled": True,
+        },
+    )
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
@@ -1286,3 +2227,6 @@ async def save_push_token(body: PushTokenIn, user=Depends(current_user)):
     )
 
     return {"ok": True}
+
+# Include API router only after every @api route has been registered.
+app.include_router(api)

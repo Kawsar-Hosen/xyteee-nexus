@@ -41,6 +41,7 @@ import { Avatar } from "@/src/components/Avatar";
 import { VoiceBubble } from "@/src/components/VoiceBubble";
 import { useVoiceRecorder } from "@/src/hooks/useVoiceRecorder";
 import { fonts, radii, spacing } from "@/src/theme";
+import { VerifiedBadge } from "@/src/components/VerifiedBadge";
 
 const REACTIONS = ["❤️", "😂", "🔥", "😮", "😢", "👏", "👍"];
 
@@ -103,17 +104,54 @@ export default function ChatScreen() {
   useEffect(() => {
     return subscribe((e) => {
       if (e.type === "message" && e.message.conversation_id === conversation_id) {
-        setMessages((prev) => (prev.some((m) => m.message_id === e.message.message_id) ? prev : [...prev, e.message]));
+        setMessages((prev) => {
+          if (prev.some((m) => m.message_id === e.message.message_id)) {
+            return prev;
+          }
+
+          const tempIndex = prev.findIndex(
+            (m) =>
+              String(m.message_id).startsWith("temp-") &&
+              m.sender_id === e.message.sender_id &&
+              m.content === e.message.content &&
+              m.kind === e.message.kind
+          );
+
+          if (tempIndex !== -1) {
+            const next = [...prev];
+            next[tempIndex] = e.message;
+            return next;
+          }
+
+          return [...prev, e.message];
+        });
       } else if (e.type === "message_edit" && e.message.conversation_id === conversation_id) {
         setMessages((prev) => prev.map((m) => (m.message_id === e.message.message_id ? e.message : m)));
       } else if (e.type === "message_react" && e.message.conversation_id === conversation_id) {
         setMessages((prev) => prev.map((m) => (m.message_id === e.message.message_id ? e.message : m)));
+      } else if (e.type === "message_read" && e.conversation_id === conversation_id) {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.message_id === e.message_id
+              ? { ...m, read_by: e.read_by || m.read_by }
+              : m
+          )
+        );
       } else if (e.type === "message_delete") {
         setMessages((prev) => prev.map((m) => (m.message_id === e.message_id ? { ...m, deleted_for_everyone: true, content: "", media: null, kind: "deleted" } : m)));
       } else if (e.type === "typing" && e.conversation_id === conversation_id && e.user_id !== user?.user_id) {
         setOtherTyping(e.is_typing);
       } else if (e.type === "presence" && e.user_id === other?.user_id) {
-        setOther((o: any) => (o ? { ...o, online: e.online, last_seen: e.last_seen } : o));
+        setOther((o: any) =>
+          o
+            ? {
+                ...o,
+                online: e.online,
+                online_status: e.online_status,
+                last_seen: e.last_seen,
+              }
+            : o
+        );
       }
     });
   }, [subscribe, conversation_id, user, other?.user_id]);
@@ -146,16 +184,44 @@ export default function ChatScreen() {
       await api(`/chats/message/${editing.message_id}`, { method: "PUT", body: { content: t }, token: token! });
       return;
     }
-    setSending(true);
-    const body: any = { conversation_id, content: text.trim(), kind: "text" };
+    const content = text.trim();
+    const body: any = { conversation_id, content, kind: "text" };
     if (replyTo) body.reply_to = replyTo.message_id;
+
     setText("");
     setReplyTo(null);
     emitTyping(false);
+
+    const tempId = `temp-${Date.now()}`;
+    const optimisticMessage: any = {
+      message_id: tempId,
+      conversation_id,
+      sender_id: user?.user_id,
+      content,
+      kind: "text",
+      media: null,
+      created_at: new Date().toISOString(),
+      read_by: [user?.user_id].filter(Boolean),
+      reply_to: replyTo || null,
+      reactions: [],
+    };
+
+    setMessages((prev) => [...prev, optimisticMessage]);
+
     try {
-      await api<Msg>("/chats/message", { method: "POST", body, token: token! });
-    } finally {
-      setSending(false);
+      const sent = await api<Msg>("/chats/message", {
+        method: "POST",
+        body,
+        token: token!,
+      });
+
+      setMessages((prev) =>
+        prev.map((m) => (m.message_id === tempId ? sent : m))
+      );
+    } catch {
+      setMessages((prev) =>
+        prev.filter((m) => m.message_id !== tempId)
+      );
     }
   };
 
@@ -254,9 +320,18 @@ export default function ChatScreen() {
           <Feather name="chevron-left" size={26} color={colors.foreground} />
         </TouchableOpacity>
         <TouchableOpacity style={{ flexDirection: "row", alignItems: "center", flex: 1 }} onPress={() => other && router.push(`/user/${other.user_id}`)}>
-          <Avatar uri={other?.profile_picture} name={other?.display_name} size={38} online={other?.online} />
+          <Avatar
+            uri={other?.profile_picture}
+            name={other?.display_name}
+            size={38}
+            online={other?.online}
+            onlineStatus={other?.online_status || "online"}
+          />
           <View style={{ marginLeft: 12 }}>
-            <NxText variant="titleSm" numberOfLines={1}>{other?.display_name || "…"}</NxText>
+            <View style={{ flexDirection: "row", alignItems: "center" }}>
+              <NxText variant="titleSm" numberOfLines={1}>{other?.display_name || "…"}</NxText>
+              <VerifiedBadge badgeType={other?.badge_type} size={16} />
+            </View>
             <NxText variant="caption" style={{ color: otherTyping ? colors.primary : colors.mutedFg }}>
               {otherTyping ? "typing…" : lastSeen}
             </NxText>
@@ -516,7 +591,46 @@ function MessageBubble({ m, isMe, onLongPress, replySource }: { m: Msg; isMe: bo
               {m.edited ? <NxText style={{ color: fg, fontSize: 10, opacity: 0.7, marginRight: 6 }}>edited</NxText> : null}
               <NxText style={{ color: fg, fontSize: 10, opacity: 0.7 }}>{time}</NxText>
               {isMe ? (
-                <Feather name={(m.read_by?.length || 0) > 1 ? "check-circle" : "check"} size={12} color={fg} style={{ marginLeft: 4, opacity: 0.7 }} />
+                <View
+                  style={{
+                    marginLeft: 4,
+                    width: (m.read_by?.length || 0) > 1 ? 16 : 10,
+                    height: 13,
+                    position: "relative",
+                  }}
+                >
+                  <NxText
+                    style={{
+                      position: "absolute",
+                      left: 0,
+                      top: -2,
+                      fontSize: 13,
+                      lineHeight: 15,
+                      color: fg,
+                      opacity: 0.75,
+                      fontFamily: fonts.bodySemi,
+                    }}
+                  >
+                    ✓
+                  </NxText>
+
+                  {(m.read_by?.length || 0) > 1 ? (
+                    <NxText
+                      style={{
+                        position: "absolute",
+                        left: 5,
+                        top: -2,
+                        fontSize: 13,
+                        lineHeight: 15,
+                        color: fg,
+                        opacity: 0.75,
+                        fontFamily: fonts.bodySemi,
+                      }}
+                    >
+                      ✓
+                    </NxText>
+                  ) : null}
+                </View>
               ) : null}
             </View>
           </View>

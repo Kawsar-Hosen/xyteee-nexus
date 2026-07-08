@@ -10,6 +10,7 @@ import { api } from "@/src/api/client";
 import { NxText } from "@/src/components/NxText";
 import { Avatar } from "@/src/components/Avatar";
 import { fonts, radii, spacing } from "@/src/theme";
+import { VerifiedBadge } from "@/src/components/VerifiedBadge";
 
 export default function Blocked() {
   const { colors } = useTheme();
@@ -50,7 +51,10 @@ export default function Blocked() {
             <View style={[styles.row, { backgroundColor: colors.surface, borderColor: colors.border }]}>
               <Avatar uri={item.profile_picture} name={item.display_name} size={40} />
               <View style={{ flex: 1, marginLeft: 12 }}>
-                <NxText variant="titleSm">{item.display_name}</NxText>
+                <View style={{ flexDirection: "row", alignItems: "center" }}>
+              <NxText variant="titleSm">{item.display_name}</NxText>
+              <VerifiedBadge badgeType={item.badge_type} size={16} />
+            </View>
                 <NxText variant="bodySm">@{item.username}</NxText>
               </View>
               <TouchableOpacity testID={`unblock-${item.username}`} onPress={() => unblock(item.user_id)} style={[styles.btn, { borderColor: colors.border }]}>

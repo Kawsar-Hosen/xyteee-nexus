@@ -21,13 +21,22 @@ import { api } from "@/src/api/client";
 import { NxText } from "@/src/components/NxText";
 import { Avatar } from "@/src/components/Avatar";
 import { NexusMark } from "@/src/components/NexusMark";
+import { VerifiedBadge } from "@/src/components/VerifiedBadge";
 import { fonts, radii, spacing } from "@/src/theme";
 import { DOCK_PAD } from "@/src/theme/layout";
 
 dayjs.extend(relativeTime);
 
 type StoryGroup = {
-  user: { user_id: string; display_name: string; username: string; profile_picture?: string; online?: boolean };
+  user: {
+    user_id: string;
+    display_name: string;
+    username: string;
+    profile_picture?: string;
+    badge_type?: string | null;
+    online?: boolean;
+    online_status?: "online" | "idle" | "dnd" | "invisible";
+  };
   stories: any[];
 };
 
@@ -41,7 +50,9 @@ type Chat = {
     display_name: string;
     username: string;
     profile_picture?: string;
+    badge_type?: string | null;
     online?: boolean;
+    online_status?: "online" | "idle" | "dnd" | "invisible";
     last_seen?: string;
   };
 };
@@ -61,14 +72,28 @@ export default function Feed() {
   const load = useCallback(async () => {
     if (!token) return;
     try {
-      const [f, c, n] = await Promise.all([
+      const [f, c] = await Promise.allSettled([
         api<{ feed: StoryGroup[] }>("/stories/feed", { token }),
         api<{ chats: Chat[] }>("/chats", { token }),
-        api<{ notifications: any[] }>("/notifications", { token }),
       ]);
-      setStories(f.feed || []);
-      setChats(c.chats || []);
-      setNotifCount((n.notifications || []).filter((x) => !x.read).length);
+
+      api<{ notifications: any[] }>("/notifications", { token })
+        .then((n) => {
+          setNotifCount(
+            (n.notifications || []).filter((x) => !x.read).length
+          );
+        })
+        .catch(() => {});
+
+      if (f.status === "fulfilled") {
+        setStories(f.value.feed || []);
+      }
+
+      if (c.status === "fulfilled") {
+        setChats(c.value.chats || []);
+      }
+
+
     } finally {
       setLoading(false);
     }
@@ -193,9 +218,43 @@ function StoriesRow({
           <Feather name="plus" size={22} color={colors.onPrimary} />
         </View>
         <NxText variant="caption" style={{ color: colors.foreground, marginTop: 8, fontFamily: fonts.bodySemi }}>
-          {myStories ? "Add more" : "Your reverie"}
+          Add more
         </NxText>
       </TouchableOpacity>
+
+      {myStories ? (
+        <TouchableOpacity
+          testID="story-my-reveries"
+          activeOpacity={0.85}
+          onPress={() => meId && onOpen(meId)}
+          style={[styles.storyCard, { borderColor: colors.primary }]}
+        >
+          {myStories.stories[0]?.kind === "image" && myStories.stories[0]?.media ? (
+            <View style={{ ...StyleSheet.absoluteFillObject, overflow: "hidden", borderRadius: radii.lg }}>
+              <Avatar
+                uri={myStories.stories[0].media}
+                size={110}
+                name="Your Reveries"
+              />
+            </View>
+          ) : null}
+          <View style={styles.storyOverlay} />
+          <View style={styles.storyBottom}>
+            <Avatar
+              uri={myStories.user.profile_picture}
+              name={myStories.user.display_name}
+              size={28}
+              ring
+              online={myStories.user.online}
+              onlineStatus={myStories.user.online_status || "online"}
+            />
+            <NxText variant="caption" style={{ color: "#FFF", marginTop: 6, fontFamily: fonts.bodySemi }}>
+              Your Reveries
+            </NxText>
+          </View>
+        </TouchableOpacity>
+      ) : null}
+
       {stories
         .filter((s) => s.user?.user_id !== meId)
         .map((g) => (
@@ -214,10 +273,20 @@ function StoriesRow({
             ) : null}
             <View style={styles.storyOverlay} />
             <View style={styles.storyBottom}>
-              <Avatar uri={g.user.profile_picture} name={g.user.display_name} size={28} ring online={g.user.online} />
-              <NxText variant="caption" style={{ color: "#FFF", marginTop: 6, fontFamily: fonts.bodySemi }}>
-                {g.user.display_name.split(" ")[0]}
-              </NxText>
+              <Avatar
+                uri={g.user.profile_picture}
+                name={g.user.display_name}
+                size={28}
+                ring
+                online={g.user.online}
+                onlineStatus={g.user.online_status || "online"}
+              />
+              <View style={{ flexDirection: "row", alignItems: "center", marginTop: 6 }}>
+                <NxText variant="caption" style={{ color: "#FFF", fontFamily: fonts.bodySemi }}>
+                  {g.user.display_name.split(" ")[0]}
+                </NxText>
+                <VerifiedBadge badgeType={g.user.badge_type} size={14} />
+              </View>
             </View>
           </TouchableOpacity>
         ))}
@@ -231,12 +300,21 @@ function ChatRow({ chat, onPress }: { chat: Chat; onPress: () => void }) {
   const time = chat.last_message_at ? dayjs(chat.last_message_at).fromNow(true) : "";
   return (
     <TouchableOpacity testID={`chat-row-${chat.conversation_id}`} onPress={onPress} activeOpacity={0.8} style={styles.chatRow}>
-      <Avatar uri={chat.other_user?.profile_picture} name={chat.other_user?.display_name} size={52} online={chat.other_user?.online} />
+      <Avatar
+        uri={chat.other_user?.profile_picture}
+        name={chat.other_user?.display_name}
+        size={52}
+        online={chat.other_user?.online}
+        onlineStatus={chat.other_user?.online_status || "online"}
+      />
       <View style={{ flex: 1, marginLeft: 14 }}>
         <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-          <NxText variant="titleSm" numberOfLines={1} style={{ flex: 1 }}>
-            {chat.other_user?.display_name || "Unknown"}
-          </NxText>
+          <View style={{ flex: 1, flexDirection: "row", alignItems: "center" }}>
+            <NxText variant="titleSm" numberOfLines={1}>
+              {chat.other_user?.display_name || "Unknown"}
+            </NxText>
+            <VerifiedBadge badgeType={chat.other_user?.badge_type} size={16} />
+          </View>
           <NxText variant="caption">{time}</NxText>
         </View>
         <View style={{ flexDirection: "row", alignItems: "center", marginTop: 4 }}>

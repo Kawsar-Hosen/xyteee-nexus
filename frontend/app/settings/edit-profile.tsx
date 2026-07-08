@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { View, StyleSheet, TextInput, TouchableOpacity, ScrollView, ActivityIndicator, Image } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -20,6 +20,39 @@ export default function EditProfile() {
   const [bio, setBio] = useState(user?.bio || "");
   const [avatar, setAvatar] = useState(user?.profile_picture || "");
   const [cover, setCover] = useState(user?.cover_picture || "");
+
+  const birthdayParts = (user?.birthday || "").split("-");
+  const [birthYear, setBirthYear] = useState(birthdayParts[0] || "");
+  const [birthMonth, setBirthMonth] = useState(birthdayParts[1] || "");
+  const [birthDay, setBirthDay] = useState(birthdayParts[2] || "");
+  const [birthdayVisibility, setBirthdayVisibility] = useState<
+    "private" | "public" | "bonds"
+  >(user?.birthday_visibility || "private");
+
+  const currentYear = new Date().getFullYear();
+  const years = Array.from(
+    { length: 100 },
+    (_, index) => String(currentYear - index)
+  );
+  const months = Array.from(
+    { length: 12 },
+    (_, index) => String(index + 1).padStart(2, "0")
+  );
+  const daysInSelectedMonth =
+    birthYear && birthMonth
+      ? new Date(Number(birthYear), Number(birthMonth), 0).getDate()
+      : 31;
+  const days = Array.from(
+    { length: daysInSelectedMonth },
+    (_, index) => String(index + 1).padStart(2, "0")
+  );
+
+  useEffect(() => {
+    if (birthDay && Number(birthDay) > daysInSelectedMonth) {
+      setBirthDay("");
+    }
+  }, [birthDay, daysInSelectedMonth]);
+
   const [busy, setBusy] = useState(false);
 
   const pickImage = async (target: "avatar" | "cover") => {
@@ -46,6 +79,12 @@ export default function EditProfile() {
         bio,
         profile_picture: avatar,
         cover_picture: cover,
+        ...(birthYear && birthMonth && birthDay
+          ? {
+              birthday: `${birthYear}-${birthMonth}-${birthDay}`,
+              birthday_visibility: birthdayVisibility,
+            }
+          : {}),
       });
       router.back();
     } finally { setBusy(false); }
@@ -105,6 +144,101 @@ export default function EditProfile() {
             placeholder="A few words about you…"
             placeholderTextColor={colors.mutedFg}
           />
+
+          <View style={styles.birthdaySection}>
+            <View style={styles.sectionHeadingRow}>
+              <View
+                style={[
+                  styles.sectionIcon,
+                  { backgroundColor: colors.primary + "18" },
+                ]}
+              >
+                <Feather name="gift" size={17} color={colors.primary} />
+              </View>
+
+              <View style={{ flex: 1 }}>
+                <NxText variant="titleSm">Birthday</NxText>
+                <NxText
+                  variant="bodySm"
+                  style={{ color: colors.mutedFg, marginTop: 3 }}
+                >
+                  Add or change your birthday and who can see it.
+                </NxText>
+              </View>
+            </View>
+
+            <View style={styles.dateRow}>
+              <DateChoice
+                label="Year"
+                value={birthYear}
+                options={years}
+                onSelect={setBirthYear}
+              />
+              <DateChoice
+                label="Month"
+                value={birthMonth}
+                options={months}
+                onSelect={setBirthMonth}
+              />
+              <DateChoice
+                label="Day"
+                value={birthDay}
+                options={days}
+                onSelect={setBirthDay}
+              />
+            </View>
+
+            <View style={styles.visibilityRow}>
+              {[
+                { value: "private", label: "Private", icon: "lock" },
+                { value: "public", label: "Public", icon: "globe" },
+                { value: "bonds", label: "Bonds", icon: "users" },
+              ].map((option) => {
+                const active = birthdayVisibility === option.value;
+
+                return (
+                  <TouchableOpacity
+                    key={option.value}
+                    activeOpacity={0.8}
+                    onPress={() =>
+                      setBirthdayVisibility(
+                        option.value as "private" | "public" | "bonds"
+                      )
+                    }
+                    style={[
+                      styles.visibilityOption,
+                      {
+                        backgroundColor: active
+                          ? colors.primary + "18"
+                          : colors.surface,
+                        borderColor: active
+                          ? colors.primary
+                          : colors.border,
+                      },
+                    ]}
+                  >
+                    <Feather
+                      name={option.icon as any}
+                      size={16}
+                      color={active ? colors.primary : colors.mutedFg}
+                    />
+                    <NxText
+                      style={{
+                        marginTop: 7,
+                        fontSize: 12,
+                        fontFamily: fonts.bodySemi,
+                        color: active
+                          ? colors.primary
+                          : colors.foreground,
+                      }}
+                    >
+                      {option.label}
+                    </NxText>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -118,4 +252,159 @@ const styles = StyleSheet.create({
   coverOverlay: { position: "absolute", bottom: 12, right: 16, flexDirection: "row", alignItems: "center", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 20, backgroundColor: "rgba(0,0,0,0.4)" },
   avatarCam: { position: "absolute", bottom: 4, right: 4, width: 30, height: 30, borderRadius: 15, alignItems: "center", justifyContent: "center" },
   input: { borderWidth: 1, borderRadius: radii.md, padding: 14, fontFamily: "Outfit", fontSize: 15, marginTop: 6 },
+  birthdaySection: {
+    marginTop: spacing.xl,
+    paddingBottom: spacing.lg,
+  },
+  sectionHeadingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  sectionIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: spacing.md,
+  },
+  dateRow: {
+    flexDirection: "row",
+    gap: spacing.sm,
+    marginTop: spacing.lg,
+  },
+  visibilityRow: {
+    flexDirection: "row",
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  visibilityOption: {
+    flex: 1,
+    minHeight: 72,
+    borderWidth: 1,
+    borderRadius: radii.md,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  dateButton: {
+    minHeight: 52,
+    borderWidth: 1,
+    borderRadius: radii.md,
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  optionList: {
+    marginTop: 6,
+    borderWidth: 1,
+    borderRadius: radii.md,
+    overflow: "hidden",
+  },
+  optionItem: {
+    minHeight: 44,
+    justifyContent: "center",
+    paddingHorizontal: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
 });
+
+
+function DateChoice({
+  label,
+  value,
+  options,
+  onSelect,
+}: {
+  label: string;
+  value: string;
+  options: string[];
+  onSelect: (value: string) => void;
+}) {
+  const { colors } = useTheme();
+  const [open, setOpen] = useState(false);
+
+  return (
+    <View style={{ flex: 1 }}>
+      <NxText
+        variant="caption"
+        style={{ color: colors.mutedFg, marginBottom: 6 }}
+      >
+        {label}
+      </NxText>
+
+      <TouchableOpacity
+        activeOpacity={0.8}
+        onPress={() => setOpen((current) => !current)}
+        style={[
+          styles.dateButton,
+          {
+            backgroundColor: colors.surface,
+            borderColor: open ? colors.primary : colors.border,
+          },
+        ]}
+      >
+        <NxText
+          style={{
+            flex: 1,
+            color: value ? colors.foreground : colors.mutedFg,
+            fontFamily: fonts.bodyMedium,
+          }}
+        >
+          {value || "Select"}
+        </NxText>
+        <Feather
+          name={open ? "chevron-up" : "chevron-down"}
+          size={16}
+          color={colors.mutedFg}
+        />
+      </TouchableOpacity>
+
+      {open ? (
+        <View
+          style={[
+            styles.optionList,
+            {
+              backgroundColor: colors.surface,
+              borderColor: colors.border,
+            },
+          ]}
+        >
+          <ScrollView
+            nestedScrollEnabled
+            style={{ maxHeight: 180 }}
+            showsVerticalScrollIndicator={false}
+          >
+            {options.map((option) => (
+              <TouchableOpacity
+                key={option}
+                onPress={() => {
+                  onSelect(option);
+                  setOpen(false);
+                }}
+                style={[
+                  styles.optionItem,
+                  { borderBottomColor: colors.border },
+                ]}
+              >
+                <NxText
+                  style={{
+                    color:
+                      value === option
+                        ? colors.primary
+                        : colors.foreground,
+                    fontFamily:
+                      value === option
+                        ? fonts.bodySemi
+                        : fonts.body,
+                  }}
+                >
+                  {option}
+                </NxText>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+      ) : null}
+    </View>
+  );
+}

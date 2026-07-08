@@ -4,7 +4,8 @@
  * The web implementation (VoiceBubble.web.tsx) is used for web builds.
  */
 import React, { useEffect } from "react";
-import { View, TouchableOpacity, StyleSheet, Alert } from "react-native";
+import { useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
+import { View, TouchableOpacity, StyleSheet } from "react-native";
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -39,6 +40,7 @@ function fmt(sec: number) {
 const BAR_COUNT = 28;
 
 export function VoiceBubble({
+  mediaUri,
   duration,
   messageId,
   isMe,
@@ -54,15 +56,22 @@ export function VoiceBubble({
   const bg = isMe ? colors.primary : colors.surface;
   const border = isMe ? "transparent" : colors.border;
   const durSec = parseDuration(duration || "0:00");
+  const player = useAudioPlayer(mediaUri);
+  const status = useAudioPlayerStatus(player);
 
   const handlePlay = () => {
-    Alert.alert("Voice Playback", "Install expo-audio to enable voice message playback on mobile.");
+    if (status.playing) {
+      player.pause();
+    } else {
+      if (status.didJustFinish) player.seekTo(0);
+      player.play();
+    }
   };
 
   return (
     <View style={[styles.wrap, { backgroundColor: bg, borderColor: border }]}>
       <TouchableOpacity onPress={handlePlay} style={[styles.playBtn, { backgroundColor: tint + "22" }]}>
-        <Feather name="play" size={20} color={tint} />
+        <Feather name={status.playing ? "pause" : "play"} size={20} color={tint} />
       </TouchableOpacity>
       <View style={{ flex: 1 }}>
         <View style={styles.bars}>

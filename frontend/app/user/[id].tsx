@@ -4,6 +4,14 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import { Feather } from "@expo/vector-icons";
+import Animated, {
+  FadeInDown,
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withSequence,
+  withTiming,
+} from "react-native-reanimated";
 
 import { useTheme } from "@/src/context/ThemeContext";
 import { useAuth } from "@/src/context/AuthContext";
@@ -19,12 +27,35 @@ export default function UserProfile() {
   const { token } = useAuth();
   const router = useRouter();
   const [u, setU] = useState<any>(null);
+  const [notFound, setNotFound] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [hasStory, setHasStory] = useState(false);
 
   const load = useCallback(async () => {
     if (!token || !id) return;
-    const r = await api<any>(`/users/${id}`, { token });
-    setU(r);
+    try {
+      setNotFound(false);
+      const r = await api<any>(`/users/${id}`, { token });
+      setU(r);
+
+      try {
+        const storyResult = await api<{ feed: any[] }>("/stories/feed", { token });
+        setHasStory(
+          (storyResult.feed || []).some(
+            (g: any) =>
+              g.user?.user_id === id &&
+              (g.stories || []).length > 0
+          )
+        );
+      } catch {
+        setHasStory(false);
+      }
+    } catch (e: any) {
+      if (e?.status === 404) {
+        setU(null);
+        setNotFound(true);
+      }
+    }
   }, [token, id]);
 
   useEffect(() => { load(); }, [load]);
@@ -41,6 +72,42 @@ export default function UserProfile() {
     const r = await api<{ conversation: any }>("/chats/open", { method: "POST", body: { user_id: id }, token: token! });
     router.push(`/chat/${r.conversation.conversation_id}`);
   };
+
+  if (notFound) {
+    return (
+      <SafeAreaView edges={["top"]} style={{ flex: 1, backgroundColor: colors.background }}>
+        <View style={[styles.notFoundHeader, { borderBottomColor: colors.border }]}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn}>
+            <Feather name="chevron-left" size={24} color={colors.foreground} />
+          </TouchableOpacity>
+          <NxText variant="titleSm">Profile</NxText>
+          <View style={{ width: 40 }} />
+        </View>
+
+        <View style={styles.notFoundBody}>
+          <View style={[styles.notFoundAvatar, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Feather name="user" size={42} color={colors.mutedFg} />
+          </View>
+
+          <NxText variant="title" style={{ marginTop: 18 }}>
+            User Not Found
+          </NxText>
+
+          <NxText
+            variant="bodySm"
+            style={{
+              marginTop: 8,
+              color: colors.mutedFg,
+              textAlign: "center",
+              maxWidth: 280,
+            }}
+          >
+            This profile is unavailable.
+          </NxText>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   if (!u) {
     return (
@@ -64,23 +131,185 @@ export default function UserProfile() {
           </TouchableOpacity>
         </View>
         <View style={{ paddingHorizontal: spacing.lg }}>
-          <View style={{ marginTop: -50 }}>
-            <Avatar uri={u.profile_picture} name={u.display_name} size={100} online={u.online} />
+          <View style={styles.profileTopRow}>
+            <View style={{ marginTop: -50 }}>
+              <Avatar
+                uri={u.profile_picture}
+                name={u.display_name}
+                size={100}
+                online={u.online}
+                onlineStatus={u.online_status || "online"}
+              />
+            </View>
+
+            {!u.private_locked && u.status_text ? (
+              <View
+                style={[
+                  styles.statusBubble,
+                  {
+                    backgroundColor: colors.surface,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <View
+                  style={[
+                    styles.statusDot,
+                    { backgroundColor: colors.primary },
+                  ]}
+                />
+                <NxText
+                  numberOfLines={2}
+                  style={{
+                    flexShrink: 1,
+                    color: colors.foreground,
+                    fontFamily: fonts.bodyMedium,
+                    fontSize: 13,
+                    lineHeight: 18,
+                  }}
+                >
+                  {u.status_text}
+                </NxText>
+              </View>
+            ) : null}
           </View>
+          {hasStory ? (
+            <TouchableOpacity
+              testID="user-story"
+              onPress={() => router.push(`/story/${id}`)}
+              style={{ alignSelf: "flex-start", marginTop: 10 }}
+            >
+              <NxText
+                style={{
+                  color: colors.primary,
+                  fontFamily: fonts.bodySemi,
+                  fontSize: 14,
+                }}
+              >
+                Story
+              </NxText>
+            </TouchableOpacity>
+          ) : null}
+
           <View style={{ marginTop: spacing.md }}>
             <View style={{ flexDirection: "row", alignItems: "center" }}>
               <NxText variant="title" style={{ flexShrink: 1 }}>{u.display_name}</NxText>
-              <VerifiedBadge badgeType={u.badge_type} size={18} />
+              <VerifiedBadge badgeType={u.badge_type} verifiedSince={u.verified_since} showInfo size={18} />
             </View>
             <NxText variant="bodySm">@{u.username}</NxText>
           </View>
-          {u.bio ? <NxText variant="body" style={{ marginTop: spacing.md }}>{u.bio}</NxText> : null}
 
-          <View style={[styles.statsRow, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <Stat label="Bonds" value={u.friend_count ?? 0} />
-            <View style={{ width: 1, backgroundColor: colors.border }} />
-            <Stat label="Reveries" value={u.story_count ?? 0} />
-          </View>
+          {!u.private_locked && u.bio ? (
+            <NxText variant="body" style={{ marginTop: spacing.md }}>
+              {u.bio}
+            </NxText>
+          ) : null}
+
+          {!u.private_locked && u.birthday ? (
+            <Animated.View
+              entering={FadeInDown.duration(650).springify()}
+              style={{
+                marginTop: spacing.md,
+                flexDirection: "row",
+                alignItems: "center",
+              }}
+            >
+              <BirthdayGift color={colors.primary} />
+              <NxText
+                variant="bodySm"
+                style={{
+                  marginLeft: 8,
+                  color: colors.mutedFg,
+                  fontFamily: fonts.bodyMedium,
+                }}
+              >
+                Birthday · {new Date(`${u.birthday}T00:00:00`).toLocaleDateString(
+                  undefined,
+                  {
+                    month: "long",
+                    day: "numeric",
+                    year: "numeric",
+                  }
+                )}
+              </NxText>
+            </Animated.View>
+          ) : null}
+
+          {!u.private_locked && (u.mutual_bonds_count ?? 0) > 0 ? (
+            <View style={styles.mutualRow}>
+              <View style={styles.mutualAvatars}>
+                {(u.mutual_bonds_preview || []).slice(0, 3).map((person: any, index: number) => (
+                  <View
+                    key={person.user_id}
+                    style={[
+                      styles.mutualAvatarWrap,
+                      {
+                        marginLeft: index === 0 ? 0 : -7,
+                        zIndex: 3 - index,
+                        borderColor: colors.background,
+                      },
+                    ]}
+                  >
+                    <Avatar
+                      uri={person.profile_picture}
+                      name={person.display_name}
+                      size={22}
+                    />
+                  </View>
+                ))}
+              </View>
+
+              <NxText
+                variant="bodySm"
+                style={{ marginLeft: 7, color: colors.mutedFg, fontFamily: fonts.bodySemi }}
+              >
+                {u.mutual_bonds_count} Mutual {u.mutual_bonds_count === 1 ? "Bond" : "Bonds"}
+              </NxText>
+            </View>
+          ) : null}
+
+          {!u.private_locked ? (
+            <View style={[styles.statsRow, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <Stat label="Bonds" value={u.friend_count ?? 0} />
+              <View style={{ width: 1, backgroundColor: colors.border }} />
+              <Stat label="Reveries" value={u.story_count ?? 0} />
+            </View>
+          ) : (
+            <View
+              style={[
+                styles.privateCard,
+                {
+                  backgroundColor: colors.surface,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
+              <View
+                style={[
+                  styles.privateIcon,
+                  { backgroundColor: colors.surfaceHigh },
+                ]}
+              >
+                <Feather name="lock" size={24} color={colors.foreground} />
+              </View>
+
+              <NxText variant="titleSm" style={{ marginTop: 14 }}>
+                This account is private
+              </NxText>
+
+              <NxText
+                variant="bodySm"
+                style={{
+                  marginTop: 7,
+                  color: colors.mutedFg,
+                  textAlign: "center",
+                  maxWidth: 280,
+                }}
+              >
+                Send a bond request to see this profile's reveries and private content.
+              </NxText>
+            </View>
+          )}
 
           <View style={{ height: spacing.lg }} />
 
@@ -134,9 +363,116 @@ function Stat({ label, value }: { label: string; value: any }) {
 }
 
 const styles = StyleSheet.create({
+  notFoundHeader: {
+    height: 60,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: spacing.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  notFoundBody: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: spacing.xl,
+    paddingBottom: 80,
+  },
+  notFoundAvatar: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   cover: { height: 200 },
   iconBtn: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
+  profileTopRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+  },
+  statusBubble: {
+    flexDirection: "row",
+    alignItems: "center",
+    maxWidth: "68%",
+    minHeight: 52,
+    borderWidth: 1,
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    marginLeft: 10,
+    marginTop: -18,
+  },
+  statusDot: {
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+    marginRight: 9,
+    alignSelf: "flex-start",
+    marginTop: 5,
+  },
+  mutualRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 8,
+    alignSelf: "flex-start",
+  },
+  mutualAvatars: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  mutualAvatarWrap: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    borderWidth: 1.5,
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+  },
   statsRow: { flexDirection: "row", alignItems: "center", padding: spacing.lg, borderRadius: radii.lg, borderWidth: 1, marginTop: spacing.lg },
+  privateCard: {
+    marginTop: spacing.xl,
+    borderWidth: 1,
+    borderRadius: radii.lg,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: 28,
+    alignItems: "center",
+  },
+  privateIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   primaryBtn: { height: 52, borderRadius: radii.pill, alignItems: "center", justifyContent: "center" },
   secondaryBtn: { width: 52, height: 52, borderRadius: 26, borderWidth: 1, alignItems: "center", justifyContent: "center" },
 });
+
+
+function BirthdayGift({ color }: { color: string }) {
+  const scale = useSharedValue(1);
+
+  useEffect(() => {
+    scale.value = withRepeat(
+      withSequence(
+        withTiming(1.18, { duration: 700 }),
+        withTiming(1, { duration: 700 })
+      ),
+      -1,
+      true
+    );
+  }, [scale]);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+  }));
+
+  return (
+    <Animated.View style={animatedStyle}>
+      <Feather name="gift" size={16} color={color} />
+    </Animated.View>
+  );
+}

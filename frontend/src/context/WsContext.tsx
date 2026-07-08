@@ -12,9 +12,16 @@ export type WsEvent =
   | { type: "message"; message: any }
   | { type: "message_edit"; message: any }
   | { type: "message_react"; message: any }
+  | { type: "message_read"; conversation_id: string; message_id: string; read_by: string[] }
   | { type: "message_delete"; message_id: string }
   | { type: "typing"; conversation_id: string; user_id: string; is_typing: boolean }
-  | { type: "presence"; user_id: string; online: boolean; last_seen: string }
+  | {
+      type: "presence";
+      user_id: string;
+      online: boolean;
+      online_status?: "online" | "idle" | "dnd" | "offline";
+      last_seen: string;
+    }
   | { type: "notification"; notification: any }
   | { type: "story_new"; story_id: string; user_id: string }
   | { type: "pong" };

@@ -1,12 +1,21 @@
-import React from "react";
-import { View, StyleSheet, ScrollView, TouchableOpacity, Image } from "react-native";
+import React, { useCallback, useEffect, useState } from "react";
+import { View, StyleSheet, ScrollView, TouchableOpacity, Image, Modal, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import { Feather } from "@expo/vector-icons";
+import Animated, {
+  FadeInDown,
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withSequence,
+  withTiming,
+} from "react-native-reanimated";
 
 import { useTheme } from "@/src/context/ThemeContext";
 import { useAuth } from "@/src/context/AuthContext";
+import { api } from "@/src/api/client";
 import { NxText } from "@/src/components/NxText";
 import { Avatar } from "@/src/components/Avatar";
 import { VerifiedBadge } from "@/src/components/VerifiedBadge";
@@ -17,10 +26,59 @@ const ADMIN_EMAIL = "smdkawsar2@gmail.com";
 
 export default function Profile() {
   const { colors, mode, toggle } = useTheme();
-  const { user, logout } = useAuth();
+  const { user, token, logout, updateUser } = useAuth();
   const router = useRouter();
+  const [hasStory, setHasStory] = useState(false);
+  const [bondsCount, setBondsCount] = useState(0);
+  const [reveriesCount, setReveriesCount] = useState(0);
+  const [onlineSheetOpen, setOnlineSheetOpen] = useState(false);
+  const [onlineStatusBusy, setOnlineStatusBusy] = useState(false);
+
+  const loadStory = useCallback(async () => {
+    if (!token || !user) return;
+    try {
+      const [storyResult, friendsResult] = await Promise.all([
+        api<{ feed: any[] }>("/stories/feed", { token }),
+        api<{ friends: any[] }>("/friends", { token }),
+      ]);
+
+      const myStoryGroup = (storyResult.feed || []).find(
+        (g: any) => g.user?.user_id === user.user_id
+      );
+
+      const myStories = myStoryGroup?.stories || [];
+
+      setHasStory(myStories.length > 0);
+      setReveriesCount(myStories.length);
+      setBondsCount((friendsResult.friends || []).length);
+    } catch {
+      setHasStory(false);
+      setReveriesCount(0);
+      setBondsCount(0);
+    }
+  }, [token, user]);
+
+  useEffect(() => {
+    loadStory();
+  }, [loadStory]);
 
   if (!user) return null;
+
+  const sinceValue = (() => {
+    if (!user.created_at) return "New";
+
+    const created = new Date(user.created_at);
+    const ageMs = Date.now() - created.getTime();
+    const days = Math.max(0, Math.floor(ageMs / 86400000));
+
+    if (days <= 30) return "New";
+
+    const months = Math.floor(days / 30);
+    if (months < 12) return `${months}mo`;
+
+    const years = Math.floor(days / 365);
+    return `${Math.max(1, years)}y`;
+  })();
 
   return (
     <SafeAreaView edges={["top"]} style={{ flex: 1, backgroundColor: colors.background }}>
@@ -42,14 +100,88 @@ export default function Profile() {
         </View>
 
         <View style={styles.body}>
-          <View style={{ marginTop: -50 }}>
-            <Avatar uri={user.profile_picture} name={user.display_name} size={100} online />
+          <View style={styles.profileTopRow}>
+            <TouchableOpacity
+              testID="profile-online-status"
+              activeOpacity={0.85}
+              onPress={() => setOnlineSheetOpen(true)}
+              style={{ marginTop: -50 }}
+              accessibilityRole="button"
+              accessibilityLabel="Change online status"
+            >
+              <Avatar
+                uri={user.profile_picture}
+                name={user.display_name}
+                size={100}
+                online
+                onlineStatus={user.online_status || "online"}
+              />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              testID="profile-status"
+              activeOpacity={0.8}
+              onPress={() => router.push("/settings/status")}
+              style={[
+                styles.statusBubble,
+                {
+                  backgroundColor: colors.surface,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
+              <View
+                style={[
+                  styles.statusDot,
+                  {
+                    backgroundColor: user.status_text
+                      ? colors.primary
+                      : colors.mutedFg,
+                  },
+                ]}
+              />
+              <NxText
+                numberOfLines={2}
+                style={{
+                  color: user.status_text
+                    ? colors.foreground
+                    : colors.mutedFg,
+                  fontFamily: user.status_text
+                    ? fonts.bodyMedium
+                    : fonts.body,
+                  fontSize: 14,
+                  lineHeight: 19,
+                }}
+              >
+                {user.status_text || "Set a status"}
+              </NxText>
+            </TouchableOpacity>
           </View>
+
+          <TouchableOpacity
+            testID="profile-your-story"
+            onPress={() =>
+              hasStory
+                ? router.push(`/story/${user.user_id}`)
+                : router.push("/story/create")
+            }
+            style={{ alignSelf: "flex-start", marginTop: 10 }}
+          >
+            <NxText
+              style={{
+                color: colors.primary,
+                fontFamily: fonts.bodySemi,
+                fontSize: 14,
+              }}
+            >
+              Your Story
+            </NxText>
+          </TouchableOpacity>
           <View style={{ marginTop: spacing.md, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
             <View style={{ flex: 1 }}>
               <View style={{ flexDirection: "row", alignItems: "center" }}>
                 <NxText variant="title" style={{ flexShrink: 1 }}>{user.display_name}</NxText>
-                <VerifiedBadge badgeType={user.badge_type} size={18} />
+                <VerifiedBadge badgeType={user.badge_type} verifiedSince={user.verified_since} showInfo size={18} />
               </View>
               <NxText variant="bodySm">@{user.username}</NxText>
             </View>
@@ -73,12 +205,42 @@ export default function Profile() {
             </NxText>
           )}
 
+          {user.birthday ? (
+            <Animated.View
+              entering={FadeInDown.duration(650).springify()}
+              style={{
+                marginTop: spacing.md,
+                flexDirection: "row",
+                alignItems: "center",
+              }}
+            >
+              <BirthdayGift color={colors.primary} />
+              <NxText
+                variant="bodySm"
+                style={{
+                  marginLeft: 8,
+                  color: colors.mutedFg,
+                  fontFamily: fonts.bodyMedium,
+                }}
+              >
+                Birthday · {new Date(`${user.birthday}T00:00:00`).toLocaleDateString(
+                  undefined,
+                  {
+                    month: "long",
+                    day: "numeric",
+                    year: "numeric",
+                  }
+                )}
+              </NxText>
+            </Animated.View>
+          ) : null}
+
           <View style={[styles.statsRow, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <Stat label="Bonds" value={"—"} />
+            <Stat label="Bonds" value={String(bondsCount)} />
             <Divider />
-            <Stat label="Reveries" value={"—"} />
+            <Stat label="Reveries" value={String(reveriesCount)} />
             <Divider />
-            <Stat label="Since" value={user.email_verified ? "Verified" : "New"} />
+            <Stat label="Since" value={sinceValue} />
           </View>
 
           <View style={{ height: spacing.lg }} />
@@ -92,6 +254,150 @@ export default function Profile() {
           <QuickLink icon="log-out" label="Sign out" tint={colors.danger} onPress={async () => { await logout(); router.replace("/"); }} testID="profile-logout" />
         </View>
       </ScrollView>
+
+      <Modal
+        visible={onlineSheetOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setOnlineSheetOpen(false)}
+      >
+        <Pressable
+          style={styles.onlineSheetOverlay}
+          onPress={() => setOnlineSheetOpen(false)}
+        >
+          <Pressable
+            onPress={(event) => event.stopPropagation()}
+            style={[
+              styles.onlineSheet,
+              {
+                backgroundColor: colors.surface,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <View
+              style={[
+                styles.onlineSheetHandle,
+                { backgroundColor: colors.mutedFg },
+              ]}
+            />
+
+            <NxText
+              style={[
+                styles.onlineSheetTitle,
+                { color: colors.foreground },
+              ]}
+            >
+              Change Online Status
+            </NxText>
+
+            {[
+              {
+                key: "online",
+                label: "Online",
+                description: "You're active and available",
+                color: "#23A55A",
+              },
+              {
+                key: "idle",
+                label: "Idle",
+                description: "You may be away for a while",
+                color: "#F0B232",
+              },
+              {
+                key: "dnd",
+                label: "Do Not Disturb",
+                description: "Show that you don't want to be disturbed",
+                color: "#F23F43",
+              },
+              {
+                key: "invisible",
+                label: "Invisible",
+                description: "Appear offline to everyone",
+                color: "#80848E",
+              },
+            ].map((option) => {
+              const selected =
+                (user.online_status || "online") === option.key;
+
+              return (
+                <TouchableOpacity
+                  key={option.key}
+                  activeOpacity={0.75}
+                  disabled={onlineStatusBusy}
+                  onPress={async () => {
+                    setOnlineStatusBusy(true);
+                    try {
+                      await updateUser({
+                        online_status: option.key as
+                          | "online"
+                          | "idle"
+                          | "dnd"
+                          | "invisible",
+                      });
+                      setOnlineSheetOpen(false);
+                    } finally {
+                      setOnlineStatusBusy(false);
+                    }
+                  }}
+                  style={[
+                    styles.onlineSheetOption,
+                    { borderBottomColor: colors.border },
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.onlineStatusIcon,
+                      { backgroundColor: option.color },
+                    ]}
+                  >
+                    {option.key === "dnd" ? (
+                      <View style={styles.dndMinus} />
+                    ) : option.key === "invisible" ? (
+                      <View
+                        style={[
+                          styles.invisibleCenter,
+                          { backgroundColor: colors.surface },
+                        ]}
+                      />
+                    ) : null}
+                  </View>
+
+                  <View style={styles.onlineOptionText}>
+                    <NxText
+                      style={[
+                        styles.onlineOptionLabel,
+                        { color: colors.foreground },
+                      ]}
+                    >
+                      {option.label}
+                    </NxText>
+
+                    <NxText
+                      style={[
+                        styles.onlineOptionDescription,
+                        { color: colors.mutedFg },
+                      ]}
+                    >
+                      {option.description}
+                    </NxText>
+                  </View>
+
+                  {selected ? (
+                    <Feather
+                      name="check"
+                      size={21}
+                      color={colors.primary}
+                    />
+                  ) : (
+                    <View style={{ width: 21 }} />
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -129,8 +435,124 @@ const styles = StyleSheet.create({
   headerRow: { position: "absolute", top: spacing.md, left: spacing.lg, right: spacing.lg, flexDirection: "row", justifyContent: "space-between" },
   iconBtn: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
   body: { paddingHorizontal: spacing.lg },
+  profileTopRow: {
+    height: 64,
+    flexDirection: "row",
+    alignItems: "flex-start",
+  },
   editBtn: { flexDirection: "row", alignItems: "center", paddingHorizontal: 14, paddingVertical: 8, borderRadius: radii.pill, borderWidth: 1 },
+  statusBubble: {
+    flexDirection: "row",
+    alignItems: "center",
+    maxWidth: "68%",
+    minHeight: 46,
+    borderWidth: 1,
+    borderRadius: 18,
+    paddingHorizontal: 13,
+    paddingVertical: 8,
+    marginLeft: 10,
+    marginTop: -18,
+  },
+  statusDot: {
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+    marginRight: 9,
+    alignSelf: "flex-start",
+    marginTop: 5,
+  },
+  onlineSheetOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    justifyContent: "flex-end",
+  },
+  onlineSheet: {
+    borderWidth: 1,
+    borderTopLeftRadius: 26,
+    borderTopRightRadius: 26,
+    paddingHorizontal: spacing.lg,
+    paddingTop: 10,
+    paddingBottom: 28,
+  },
+  onlineSheetHandle: {
+    width: 38,
+    height: 4,
+    borderRadius: 2,
+    alignSelf: "center",
+    opacity: 0.45,
+    marginBottom: 18,
+  },
+  onlineSheetTitle: {
+    fontFamily: fonts.bodySemi,
+    fontSize: 19,
+    marginBottom: 8,
+  },
+  onlineSheetOption: {
+    minHeight: 72,
+    flexDirection: "row",
+    alignItems: "center",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  onlineStatusIcon: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  dndMinus: {
+    width: 10,
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: "#FFFFFF",
+  },
+  invisibleCenter: {
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+  },
+  onlineOptionText: {
+    flex: 1,
+    marginLeft: 14,
+    marginRight: 12,
+  },
+  onlineOptionLabel: {
+    fontFamily: fonts.bodySemi,
+    fontSize: 15,
+  },
+  onlineOptionDescription: {
+    fontFamily: fonts.body,
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 2,
+  },
   statsRow: { flexDirection: "row", alignItems: "center", padding: spacing.lg, borderRadius: radii.lg, borderWidth: 1, marginTop: spacing.lg },
   link: { flexDirection: "row", alignItems: "center", padding: spacing.md, borderRadius: radii.md, borderWidth: 1, marginBottom: spacing.sm },
   linkIcon: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
 });
+
+
+function BirthdayGift({ color }: { color: string }) {
+  const scale = useSharedValue(1);
+
+  useEffect(() => {
+    scale.value = withRepeat(
+      withSequence(
+        withTiming(1.18, { duration: 700 }),
+        withTiming(1, { duration: 700 })
+      ),
+      -1,
+      true
+    );
+  }, [scale]);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+  }));
+
+  return (
+    <Animated.View style={animatedStyle}>
+      <Feather name="gift" size={16} color={color} />
+    </Animated.View>
+  );
+}

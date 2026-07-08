@@ -1,3 +1,4 @@
+import { Alert } from "react-native";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   View,
@@ -10,11 +11,16 @@ import {
   TextInput,
   KeyboardAvoidingView,
   Platform,
+  Pressable,
   Animated,
+  PanResponder,
+  Dimensions,
+  Text,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
+import { useVideoPlayer, VideoView } from "expo-video";
 import dayjs from "dayjs";
 
 import { useTheme } from "@/src/context/ThemeContext";
@@ -23,8 +29,24 @@ import { api } from "@/src/api/client";
 import { NxText } from "@/src/components/NxText";
 import { Avatar } from "@/src/components/Avatar";
 import { fonts, radii, spacing } from "@/src/theme";
+import { VerifiedBadge } from "@/src/components/VerifiedBadge";
 
-const STORY_EMOJIS = ["❤️", "😂", "🔥", "😮", "👏"];
+const STORY_EMOJIS = ["⭐", "❤️", "😂", "🔥", "😍", "👏", "👍", "😱"];
+
+const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
+
+const STORY_TEXT_FONTS = [
+  fonts.bodySemi,
+  "serif",
+  fonts.bodySemi,
+  fonts.bodyMedium,
+  "monospace",
+  "sans-serif",
+  "sans-serif-condensed",
+  fonts.body,
+  fonts.display,
+  fonts.bodySemi,
+];
 
 type FloatEmoji = { id: number; emoji: string; anim: Animated.Value };
 
@@ -33,11 +55,25 @@ export default function StoryViewer() {
   const userId = id as string;
   const { colors } = useTheme();
   const { user, token } = useAuth();
+
   const router = useRouter();
 
   const [stories, setStories] = useState<any[]>([]);
   const [author, setAuthor] = useState<any>(null);
+  const [storyAuthors, setStoryAuthors] = useState<any[]>([]);
   const [idx, setIdx] = useState(0);
+  const [showSwipeHint, setShowSwipeHint] = useState(true);
+  const swipeHintAnim = useRef(new Animated.Value(0)).current;
+
+  const currentStory = stories[idx];
+
+  const videoPlayer = useVideoPlayer(
+    currentStory?.kind === "video" ? currentStory.media : null,
+    (player) => {
+      player.loop = true;
+      player.play();
+    }
+  );
   const [showViewers, setShowViewers] = useState(false);
   const [viewers, setViewers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -45,27 +81,87 @@ export default function StoryViewer() {
   const [sendingReply, setSendingReply] = useState(false);
   const [floatEmojis, setFloatEmojis] = useState<FloatEmoji[]>([]);
   const timerRef = useRef<any>(null);
+  const storyStartedAtRef = useRef(Date.now());
+  const remainingTimeRef = useRef(15000);
   const emojiIdRef = useRef(0);
 
   const load = useCallback(async () => {
     if (!token) return;
     const r = await api<{ feed: any[] }>("/stories/feed", { token });
-    const g = (r.feed || []).find((x) => x.user?.user_id === userId);
-    if (g) {
-      setStories(g.stories);
-      setAuthor(g.user);
-    }
+    const feed = r.feed || [];
+
+    const tappedGroup = feed.find((x) => x.user?.user_id === userId);
+    const otherGroups = feed.filter((x) => x.user?.user_id !== userId);
+    const orderedGroups = tappedGroup
+      ? [tappedGroup, ...otherGroups]
+      : otherGroups;
+
+    const allStories: any[] = [];
+    const allAuthors: any[] = [];
+
+    orderedGroups.forEach((group) => {
+      const orderedStories = [...(group.stories || [])].reverse();
+
+      orderedStories.forEach((story: any) => {
+        allStories.push(story);
+        allAuthors.push(group.user);
+      });
+    });
+
+    setStories(allStories);
+    setStoryAuthors(allAuthors);
+    setAuthor(allAuthors[0] || null);
+    setIdx(0);
     setLoading(false);
   }, [token, userId]);
 
   useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
+    if (loading || !stories.length || !showSwipeHint) return;
+
+    swipeHintAnim.setValue(0);
+
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(swipeHintAnim, {
+          toValue: 1,
+          duration: 650,
+          useNativeDriver: true,
+        }),
+        Animated.timing(swipeHintAnim, {
+          toValue: 0,
+          duration: 650,
+          useNativeDriver: true,
+        }),
+      ])
+    );
+
+    animation.start();
+
+    const hideTimer = setTimeout(() => {
+      animation.stop();
+      setShowSwipeHint(false);
+    }, 2200);
+
+    return () => {
+      clearTimeout(hideTimer);
+      animation.stop();
+    };
+  }, [loading, stories.length, showSwipeHint, swipeHintAnim]);
+
+  useEffect(() => {
+    setAuthor(storyAuthors[idx] || null);
+  }, [idx, storyAuthors]);
+
+  useEffect(() => {
     if (!stories.length) return;
     const s = stories[idx];
     if (s) api(`/stories/${s.story_id}/view`, { method: "POST", token: token! }).catch(() => {});
     if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => next(), 5000);
+    remainingTimeRef.current = 15000;
+    storyStartedAtRef.current = Date.now();
+    timerRef.current = setTimeout(() => next(), remainingTimeRef.current);
     return () => timerRef.current && clearTimeout(timerRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [idx, stories]);
@@ -74,10 +170,49 @@ export default function StoryViewer() {
     if (idx < stories.length - 1) setIdx(idx + 1);
     else router.back();
   };
+
   const prev = () => setIdx((i) => Math.max(0, i - 1));
 
-  const pauseTimer = () => { if (timerRef.current) clearTimeout(timerRef.current); };
-  const resumeTimer = () => { timerRef.current = setTimeout(() => next(), 3000); };
+  const storySwipe = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onStartShouldSetPanResponderCapture: () => false,
+
+      onMoveShouldSetPanResponder: (_, gesture) =>
+        Math.abs(gesture.dy) > 12 &&
+        Math.abs(gesture.dy) > Math.abs(gesture.dx),
+
+      onMoveShouldSetPanResponderCapture: (_, gesture) =>
+        Math.abs(gesture.dy) > 12 &&
+        Math.abs(gesture.dy) > Math.abs(gesture.dx),
+
+      onPanResponderRelease: (_, gesture) => {
+        if (gesture.dy < -70 || gesture.vy < -0.65) {
+          next();
+          return;
+        }
+
+        if (gesture.dy > 70 || gesture.vy > 0.65) {
+          prev();
+        }
+      },
+    })
+  ).current;
+
+  const pauseTimer = () => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+      const elapsed = Date.now() - storyStartedAtRef.current;
+      remainingTimeRef.current = Math.max(0, remainingTimeRef.current - elapsed);
+    }
+  };
+
+  const resumeTimer = () => {
+    if (timerRef.current || remainingTimeRef.current <= 0) return;
+    storyStartedAtRef.current = Date.now();
+    timerRef.current = setTimeout(() => next(), remainingTimeRef.current);
+  };
 
   const openViewers = async () => {
     const s = stories[idx];
@@ -133,7 +268,7 @@ export default function StoryViewer() {
     /* floating animation */
     const id = ++emojiIdRef.current;
     const anim = new Animated.Value(0);
-    setFloatEmojis((prev) => [...prev, { id, emoji, anim }]);
+    setFloatEmojis((prev) => [...prev, { id, emoji, anim }].slice(-5));
     Animated.timing(anim, { toValue: 1, duration: 1400, useNativeDriver: true }).start(() => {
       setFloatEmojis((prev) => prev.filter((e) => e.id !== id));
     });
@@ -143,7 +278,9 @@ export default function StoryViewer() {
       method: "POST",
       body: { emoji },
       token,
-    }).catch(() => {});
+    }).catch((error) => {
+      console.log("STORY REACTION RESPONSE ERROR:", error);
+    });
   };
 
   if (loading) {
@@ -154,6 +291,7 @@ export default function StoryViewer() {
     );
   }
   const s = stories[idx];
+
   if (!s) {
     return (
       <View style={{ flex: 1, backgroundColor: "#000", alignItems: "center", justifyContent: "center" }}>
@@ -165,7 +303,34 @@ export default function StoryViewer() {
 
   return (
     <View style={{ flex: 1, backgroundColor: "#000" }}>
-      <Image source={{ uri: s.media }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
+      <View
+        pointerEvents="none"
+        style={[
+          StyleSheet.absoluteFillObject,
+          {
+            transform: [
+              { translateX: (s.media_x ?? 0) * SCREEN_W },
+              { translateY: (s.media_y ?? 0) * SCREEN_H },
+              { scale: s.media_scale ?? 1 },
+            ],
+          },
+        ]}
+      >
+        {s.kind === "video" ? (
+          <VideoView
+            player={videoPlayer}
+            style={StyleSheet.absoluteFillObject}
+            contentFit="contain"
+            nativeControls={false}
+          />
+        ) : (
+          <Image
+            source={{ uri: s.media }}
+            style={StyleSheet.absoluteFillObject}
+            resizeMode="contain"
+          />
+        )}
+      </View>
       <View style={styles.overlay} />
 
       <SafeAreaView edges={["top", "bottom"]} style={{ flex: 1 }}>
@@ -187,7 +352,10 @@ export default function StoryViewer() {
           <TouchableOpacity onPress={() => router.push(`/user/${author?.user_id}`)} style={{ flexDirection: "row", alignItems: "center", flex: 1 }}>
             <Avatar uri={author?.profile_picture} name={author?.display_name} size={40} />
             <View style={{ marginLeft: 10, flex: 1 }}>
-              <NxText variant="titleSm" style={{ color: "#fff" }}>{author?.display_name}</NxText>
+              <View style={{ flexDirection: "row", alignItems: "center" }}>
+                <NxText variant="titleSm" style={{ color: "#fff" }}>{author?.display_name}</NxText>
+                <VerifiedBadge badgeType={author?.badge_type} size={16} />
+              </View>
               <NxText variant="caption" style={{ color: "rgba(255,255,255,0.65)" }}>
                 {dayjs(s.created_at).fromNow()}
               </NxText>
@@ -199,34 +367,144 @@ export default function StoryViewer() {
         </View>
 
         {/* ── Tap zones ──────────────────────────────────────────── */}
-        <View style={styles.taps} pointerEvents="box-none">
-          <TouchableOpacity testID="story-prev-tap" style={{ flex: 1 }} onPress={prev} />
-          <TouchableOpacity testID="story-next-tap" style={{ flex: 1 }} onPress={next} />
-        </View>
+        <View
+          testID="story-swipe-zone"
+          style={styles.taps}
+          onStartShouldSetResponder={() => true}
+          onMoveShouldSetResponder={() => true}
+          onResponderGrant={(event) => {
+            const { pageX, pageY } = event.nativeEvent;
+            (event.currentTarget as any).__storyStart = { x: pageX, y: pageY };
+          }}
+          onResponderRelease={(event) => {
+            const target = event.currentTarget as any;
+            const start = target.__storyStart;
+            if (!start) return;
 
-        {/* ── Caption ────────────────────────────────────────────── */}
+            const { pageX, pageY } = event.nativeEvent;
+            const dx = pageX - start.x;
+            const dy = pageY - start.y;
+
+            if (Math.abs(dy) > 55 && Math.abs(dy) > Math.abs(dx)) {
+              if (dy < 0) next();
+              else prev();
+              return;
+            }
+
+            if (Math.abs(dx) < 20 && Math.abs(dy) < 20) {
+              if (pageX < SCREEN_W / 2) prev();
+              else next();
+            }
+          }}
+        />
+
+        {/* ── First-open swipe demo ─────────────────────────────── */}
+        {showSwipeHint ? (
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              styles.swipeHint,
+              {
+                opacity: swipeHintAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0.65, 1],
+                }),
+                transform: [
+                  {
+                    translateY: swipeHintAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [18, -18],
+                    }),
+                  },
+                ],
+              },
+            ]}
+          >
+            <Feather name="chevron-up" size={30} color="#fff" />
+            <NxText style={styles.swipeHintText}>Swipe</NxText>
+            <Feather name="chevron-down" size={30} color="#fff" />
+          </Animated.View>
+        ) : null}
+
+        {/* ── Responsive saved story text ────────────────────────── */}
         {s.caption ? (
-          <View style={styles.captionBox}>
-            <NxText style={styles.captionText}>{s.caption}</NxText>
+          <View
+            pointerEvents="none"
+            style={[
+              styles.captionBox,
+              {
+                left: Math.max(
+                  8,
+                  Math.min(
+                    SCREEN_W - 248,
+                    Number(s.text_x ?? 0.08) * SCREEN_W
+                  )
+                ),
+                top: Math.max(
+                  105,
+                  Math.min(
+                    SCREEN_H - 250,
+                    Number(s.text_y ?? 0.38) * SCREEN_H
+                  )
+                ),
+              },
+            ]}
+          >
+            <Text
+              style={[
+                styles.captionText,
+                {
+                  color: String(s.text_color || "#FFFFFF"),
+                  fontSize: Math.max(
+                    12,
+                    Math.min(72, Number(s.text_size ?? 28))
+                  ),
+                  lineHeight: Math.round(
+                    Math.max(12, Math.min(72, Number(s.text_size ?? 28))) * 1.25
+                  ),
+                  fontFamily:
+                    STORY_TEXT_FONTS[
+                      Math.max(
+                        0,
+                        Math.min(9, Number(s.font_index ?? 0))
+                      )
+                    ],
+                },
+              ]}
+            >
+              {s.caption}
+            </Text>
           </View>
         ) : null}
 
         {/* ── Owner controls ─────────────────────────────────────── */}
         {isMine ? (
           <View style={styles.myControls}>
-            <TouchableOpacity testID="story-viewers-btn" onPress={openViewers} style={styles.controlPill}>
-              <Feather name="eye" size={14} color="#fff" />
-              <NxText style={styles.controlPillText}>
-                {s.viewers?.length || 0} viewers
-              </NxText>
+            <TouchableOpacity
+              testID="story-viewers-btn"
+              onPress={openViewers}
+              activeOpacity={0.78}
+              style={styles.ownerAction}
+            >
+              <View style={styles.ownerIcon}>
+                <Feather name="bar-chart-2" size={19} color="#fff" />
+              </View>
+              <View style={styles.ownerActionText}>
+                <NxText style={styles.ownerActionTitle}>
+                  {s.viewers?.length || 0} {s.viewers?.length === 1 ? "Viewer" : "Viewers"}
+                </NxText>
+                <NxText style={styles.ownerActionHint}>Story insights</NxText>
+              </View>
+              <Feather name="chevron-up" size={18} color="rgba(255,255,255,0.62)" />
             </TouchableOpacity>
+
             <TouchableOpacity
               testID="story-delete-btn"
               onPress={deleteStory}
-              style={[styles.controlPill, { backgroundColor: "rgba(224,60,60,0.38)" }]}
+              activeOpacity={0.78}
+              style={[styles.ownerIconButton, styles.ownerDeleteButton]}
             >
-              <Feather name="trash-2" size={14} color="#fff" />
-              <NxText style={styles.controlPillText}>Delete</NxText>
+              <Feather name="trash-2" size={19} color="#fff" />
             </TouchableOpacity>
           </View>
         ) : null}
@@ -261,17 +539,55 @@ export default function StoryViewer() {
             style={styles.bottomSection}
           >
             {/* Quick emoji reactions */}
-            <View style={styles.emojiRow}>
-              {STORY_EMOJIS.map((emoji) => (
-                <TouchableOpacity
-                  key={emoji}
-                  onPress={() => reactToStory(emoji)}
-                  style={styles.emojiBtn}
-                  activeOpacity={0.75}
-                >
-                  <NxText style={styles.emojiText}>{emoji}</NxText>
-                </TouchableOpacity>
-              ))}
+            <View style={styles.reactionTray}>
+              {STORY_EMOJIS.map((emoji) => {
+                const scale = new Animated.Value(1);
+
+                const pressReaction = () => {
+                  Animated.sequence([
+                    Animated.spring(scale, {
+                      toValue: 1.55,
+                      useNativeDriver: true,
+                      speed: 28,
+                      bounciness: 14,
+                    }),
+                    Animated.spring(scale, {
+                      toValue: 1,
+                      useNativeDriver: true,
+                      speed: 22,
+                      bounciness: 12,
+                    }),
+                  ]).start();
+
+                  reactToStory(emoji);
+                };
+
+                return (
+                  <TouchableOpacity
+                    key={emoji}
+                    onPress={pressReaction}
+                    style={styles.reactionItem}
+                    activeOpacity={0.75}
+                  >
+                    <Animated.View
+                      style={{
+                        transform: [{ scale }],
+                        zIndex: 20,
+                      }}
+                    >
+                      {emoji === "❤️" ? (
+  <Image
+    source={require("../../assets/reactions/heart.png")}
+    style={{ width: 34, height: 34 }}
+    resizeMode="contain"
+  />
+) : (
+  <NxText style={styles.emojiText}>{emoji}</NxText>
+)}
+                    </Animated.View>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
 
             {/* Reply bar */}
@@ -315,25 +631,74 @@ export default function StoryViewer() {
         >
           <View style={[styles.viewersSheet, { backgroundColor: colors.surface }]}>
             <View style={styles.sheetHandle} />
-            <NxText variant="title" style={{ marginBottom: spacing.md }}>Viewers</NxText>
+
+            <View style={styles.viewersHeader}>
+              <View>
+                <NxText style={styles.viewersTitle}>Story viewers</NxText>
+                <NxText style={styles.viewersSubtitle}>
+                  {viewers.length} {viewers.length === 1 ? "person has" : "people have"} seen your story
+                </NxText>
+              </View>
+
+              <View style={styles.viewerCountBadge}>
+                <Feather name="eye" size={14} color="#fff" />
+                <NxText style={styles.viewerCountText}>{viewers.length}</NxText>
+              </View>
+            </View>
+
             <FlatList
               data={viewers}
               keyExtractor={(v, i) => v.user?.user_id || String(i)}
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.viewersList}
               renderItem={({ item }) => (
-                <View style={{ flexDirection: "row", alignItems: "center", paddingVertical: 10 }}>
-                  <Avatar uri={item.user?.profile_picture} name={item.user?.display_name} size={38} />
-                  <View style={{ marginLeft: 12, flex: 1 }}>
-                    <NxText variant="titleSm">{item.user?.display_name}</NxText>
-                    <NxText variant="caption" style={{ color: colors.mutedFg }}>
-                      {dayjs(item.viewed_at).fromNow()}
-                    </NxText>
+                <View style={styles.viewerRow}>
+                  <Avatar
+                    uri={item.user?.profile_picture}
+                    name={item.user?.display_name}
+                    size={46}
+                  />
+
+                  <View style={styles.viewerInfo}>
+                    <View style={styles.viewerNameRow}>
+                      <NxText style={styles.viewerName}>
+                        {item.user?.display_name}
+                      </NxText>
+                      <VerifiedBadge badgeType={item.user?.badge_type} size={16} />
+                    </View>
+
+                    <View style={styles.viewerTimeRow}>
+                      <Feather name="clock" size={12} color={colors.mutedFg} />
+                      <NxText style={[styles.viewerTime, { color: colors.mutedFg }]}>
+                        {dayjs(item.viewed_at).fromNow()}
+                      </NxText>
+                    </View>
+                  </View>
+
+                  <View style={styles.viewerReactions}>
+                    {(item.reactions || (item.reaction ? [item.reaction] : []))
+                      .slice(0, 5)
+                      .map((emoji: string, reactionIndex: number) => (
+                        <Text
+                          key={`${item.user?.user_id || "viewer"}-${reactionIndex}`}
+                          style={styles.viewerReactionEmoji}
+                        >
+                          {emoji}
+                        </Text>
+                      ))}
                   </View>
                 </View>
               )}
               ListEmptyComponent={
-                <NxText variant="bodySm" style={{ padding: 12, color: colors.mutedFg }}>
-                  No viewers yet.
-                </NxText>
+                <View style={styles.emptyViewers}>
+                  <View style={styles.emptyViewersIcon}>
+                    <Feather name="eye-off" size={22} color={colors.mutedFg} />
+                  </View>
+                  <NxText style={styles.emptyViewersTitle}>No viewers yet</NxText>
+                  <NxText style={[styles.emptyViewersHint, { color: colors.mutedFg }]}>
+                    People who view your story will appear here.
+                  </NxText>
+                </View>
               }
             />
           </View>
@@ -374,44 +739,99 @@ const styles = StyleSheet.create({
     right: 0,
     flexDirection: "row",
   },
+  swipeHint: {
+    position: "absolute",
+    top: "38%",
+    alignSelf: "center",
+    zIndex: 100,
+    elevation: 100,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 22,
+    paddingVertical: 14,
+    borderRadius: 24,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.18)",
+  },
+  swipeHintText: {
+    color: "#fff",
+    fontFamily: fonts.bodySemi,
+    fontSize: 14,
+    letterSpacing: 0.8,
+    marginVertical: 2,
+  },
   captionBox: {
     position: "absolute",
-    bottom: 200,
-    left: 0,
-    right: 0,
-    paddingHorizontal: spacing.xl,
+    width: 240,
     alignItems: "center",
+    zIndex: 25,
+    elevation: 25,
   },
   captionText: {
-    color: "#fff",
-    fontFamily: "PlayfairDisplay-Bold",
-    fontSize: 20,
+    maxWidth: 240,
     textAlign: "center",
-    textShadowColor: "rgba(0,0,0,0.7)",
+    textShadowColor: "rgba(0,0,0,0.75)",
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 6,
   },
   myControls: {
     position: "absolute",
-    bottom: 34,
+    bottom: 28,
     left: spacing.lg,
     right: spacing.lg,
     flexDirection: "row",
-    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 10,
+    zIndex: 40,
+    elevation: 40,
   },
-  controlPill: {
+  ownerAction: {
+    flex: 1,
+    minHeight: 62,
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: radii.pill,
-    backgroundColor: "rgba(255,255,255,0.14)",
-    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: "rgba(12,12,16,0.78)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.14)",
   },
-  controlPillText: {
+  ownerIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.12)",
+  },
+  ownerActionText: {
+    flex: 1,
+    marginLeft: 11,
+  },
+  ownerActionTitle: {
     color: "#fff",
-    fontFamily: fonts.bodyMedium,
-    fontSize: 13,
+    fontFamily: fonts.bodySemi,
+    fontSize: 14,
+  },
+  ownerActionHint: {
+    color: "rgba(255,255,255,0.52)",
+    fontFamily: fonts.body,
+    fontSize: 11,
+    marginTop: 2,
+  },
+  ownerIconButton: {
+    width: 58,
+    height: 58,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+  },
+  ownerDeleteButton: {
+    backgroundColor: "rgba(239,68,68,0.24)",
+    borderColor: "rgba(255,110,110,0.28)",
   },
   floatEmoji: {
     position: "absolute",
@@ -424,50 +844,63 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
+    paddingTop: 18,
+    backgroundColor: "rgba(0,0,0,0.62)",
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    borderTopWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
   },
-  emojiRow: {
+  reactionTray: {
     flexDirection: "row",
-    justifyContent: "center",
-    gap: 8,
-    paddingBottom: 10,
-    paddingHorizontal: spacing.xl,
+    alignItems: "center",
+    justifyContent: "space-evenly",
+    marginHorizontal: 12,
+    marginBottom: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    borderRadius: 30,
+    backgroundColor: "rgba(8,8,12,0.88)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.16)",
+    elevation: 14,
   },
-  emojiBtn: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: "rgba(0,0,0,0.35)",
+  reactionItem: {
+    flex: 1,
+    height: 42,
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.14)",
   },
-  emojiText: { fontSize: 24 },
+  emojiText: {
+    fontSize: 27,
+    lineHeight: 34,
+  },
   replyBar: {
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: spacing.md,
-    paddingBottom: 28,
-    paddingTop: 4,
+    paddingBottom: 26,
     gap: 10,
   },
   replyInput: {
     flex: 1,
-    height: 46,
-    borderRadius: radii.pill,
-    backgroundColor: "rgba(0,0,0,0.42)",
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: "rgba(18,18,22,0.96)",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.22)",
-    paddingHorizontal: 18,
+    borderColor: "rgba(255,255,255,0.24)",
+    paddingHorizontal: 20,
     color: "#fff",
-    fontSize: 15,
+    fontSize: 16,
     fontFamily: "Outfit",
   },
   replySend: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    backgroundColor: "rgba(255,255,255,0.18)",
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: "rgba(30,30,36,0.96)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.22)",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -484,5 +917,104 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(128,128,128,0.4)",
     alignSelf: "center",
     marginBottom: spacing.md,
+  },
+  viewersHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 18,
+  },
+  viewersTitle: {
+    fontFamily: fonts.bodySemi,
+    fontSize: 22,
+  },
+  viewersSubtitle: {
+    fontFamily: fonts.body,
+    fontSize: 12,
+    opacity: 0.55,
+    marginTop: 3,
+  },
+  viewerCountBadge: {
+    minWidth: 48,
+    height: 36,
+    paddingHorizontal: 11,
+    borderRadius: 18,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    backgroundColor: "rgba(255,255,255,0.10)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.10)",
+  },
+  viewerCountText: {
+    color: "#fff",
+    fontFamily: fonts.bodySemi,
+    fontSize: 13,
+  },
+  viewersList: {
+    paddingBottom: 8,
+  },
+  viewerRow: {
+    minHeight: 68,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 9,
+    paddingHorizontal: 4,
+  },
+  viewerInfo: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  viewerNameRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  viewerName: {
+    fontFamily: fonts.bodySemi,
+    fontSize: 16,
+  },
+  viewerTimeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    marginTop: 4,
+  },
+  viewerTime: {
+    fontFamily: fonts.body,
+    fontSize: 12,
+  },
+  viewerReactions: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginLeft: 8,
+  },
+  viewerReactionEmoji: {
+    fontSize: 22,
+    marginLeft: -2,
+  },
+  emptyViewers: {
+    alignItems: "center",
+    paddingVertical: 30,
+    paddingHorizontal: 20,
+  },
+  emptyViewersIcon: {
+    width: 50,
+    height: 50,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.07)",
+    marginBottom: 12,
+  },
+  emptyViewersTitle: {
+    fontFamily: fonts.bodySemi,
+    fontSize: 16,
+  },
+  emptyViewersHint: {
+    fontFamily: fonts.body,
+    fontSize: 12,
+    textAlign: "center",
+    marginTop: 5,
   },
 });
