@@ -1,5 +1,6 @@
-import { Stack } from "expo-router";
+import { Stack, useRouter } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
+import * as Notifications from "expo-notifications";
 import { useEffect } from "react";
 import { LogBox, View } from "react-native";
 import { StatusBar } from "expo-status-bar";
@@ -11,7 +12,7 @@ import { useAppFonts } from "@/src/hooks/use-app-fonts";
 import { ThemeProvider, useTheme } from "@/src/context/ThemeContext";
 import { AuthProvider, useAuth } from "@/src/context/AuthContext";
 import { WsProvider } from "@/src/context/WsContext";
-import { registerForPushNotifications } from "@/src/lib/pushNotifications";
+import { registerForPushNotifications, getNotificationRoute } from "@/src/lib/pushNotifications";
 import { api } from "@/src/api/client";
 
 LogBox.ignoreAllLogs(true);
@@ -20,6 +21,7 @@ SplashScreen.preventAutoHideAsync();
 function AppShell() {
   const { mode, colors } = useTheme();
   const { user, token } = useAuth();
+  const router = useRouter();
 
   useEffect(() => {
     if (!user || !token) return;
@@ -36,6 +38,34 @@ function AppShell() {
       })
       .catch((err) => console.warn("Push registration failed:", err));
   }, [user?.user_id, token]);
+  useEffect(() => {
+    const openNotification = (
+      response: Notifications.NotificationResponse
+    ) => {
+      const data = response.notification.request.content.data;
+      const route = getNotificationRoute(data);
+
+      if (route) {
+        router.push(route as any);
+      }
+    };
+
+    const subscription =
+      Notifications.addNotificationResponseReceivedListener(
+        openNotification
+      );
+
+    Notifications.getLastNotificationResponseAsync()
+      .then((response) => {
+        if (response) {
+          openNotification(response);
+        }
+      })
+      .catch(() => {});
+
+    return () => subscription.remove();
+  }, [router]);
+
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <StatusBar style={mode === "dark" ? "light" : "dark"} />

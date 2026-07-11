@@ -132,9 +132,7 @@ export default function Friends() {
       ) : null}
 
       {loading ? (
-        <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-          <ActivityIndicator color={colors.primary} />
-        </View>
+        <BondsSkeleton />
       ) : tab === "friends" ? (
         <FlatList
           data={friends}
@@ -216,6 +214,67 @@ export default function Friends() {
   );
 }
 
+function BondsSkeleton() {
+  const { colors } = useTheme();
+  const skeletonColor = colors.surfaceHigh;
+
+  return (
+    <View style={{ flex: 1, paddingTop: spacing.md }}>
+      {[0, 1, 2, 3, 4, 5, 6].map((item) => (
+        <View key={item} style={styles.row}>
+          <View
+            style={[
+              styles.skeletonCircle,
+              {
+                width: 44,
+                height: 44,
+                borderRadius: 22,
+                backgroundColor: skeletonColor,
+              },
+            ]}
+          />
+
+          <View style={{ flex: 1, marginLeft: 14 }}>
+            <View
+              style={[
+                styles.skeletonLine,
+                {
+                  width: item % 2 === 0 ? "52%" : "40%",
+                  height: 14,
+                  backgroundColor: skeletonColor,
+                },
+              ]}
+            />
+            <View
+              style={[
+                styles.skeletonLine,
+                {
+                  width: item % 2 === 0 ? "36%" : "48%",
+                  height: 10,
+                  marginTop: 9,
+                  backgroundColor: skeletonColor,
+                },
+              ]}
+            />
+          </View>
+
+          <View
+            style={[
+              styles.skeletonCircle,
+              {
+                width: 42,
+                height: 42,
+                borderRadius: 21,
+                backgroundColor: skeletonColor,
+              },
+            ]}
+          />
+        </View>
+      ))}
+    </View>
+  );
+}
+
 function TabPill({ active, onPress, label, testID }: any) {
   const { colors } = useTheme();
   return (
@@ -235,5 +294,11 @@ const styles = StyleSheet.create({
   tabPill: { flex: 1, alignItems: "center", paddingVertical: 10, borderRadius: radii.pill },
   row: { flexDirection: "row", alignItems: "center", paddingHorizontal: spacing.lg, paddingVertical: 12 },
   smallBtn: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: radii.pill },
+  skeletonLine: {
+    borderRadius: 999,
+  },
+  skeletonCircle: {
+    flexShrink: 0,
+  },
   empty: { padding: spacing.xxl, alignItems: "center" },
 });

@@ -30,8 +30,7 @@ export default function Forgot() {
       });
       setStage("reset");
       setMsg(
-        "Reset request submitted. Contact the app owner (smdkawsar2@gmail.com) to " +
-        "receive your reset code — email delivery is not yet configured."
+        "We sent a 6-digit reset code to your email. The code expires in 15 minutes."
       );
     } catch (e: any) {
       setErr(e.message || "Failed");

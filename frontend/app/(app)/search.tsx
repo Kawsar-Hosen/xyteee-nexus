@@ -287,9 +287,7 @@ export default function Search() {
           }}
         >
           {recentLoading ? (
-            <View style={styles.recentLoading}>
-              <ActivityIndicator color={colors.primary} />
-            </View>
+            <FindSkeleton />
           ) : recentAccounts.length > 0 ? (
             <>
               <View style={styles.suggestionHeader}>
@@ -453,6 +451,133 @@ export default function Search() {
   );
 }
 
+function FindSkeleton() {
+  const { colors } = useTheme();
+  const skeletonColor = colors.surfaceHigh;
+
+  return (
+    <View>
+      <View style={styles.suggestionHeader}>
+        <View
+          style={[
+            styles.skeletonCircle,
+            { width: 52, height: 52, borderRadius: 26, backgroundColor: skeletonColor },
+          ]}
+        />
+
+        <View style={{ flex: 1 }}>
+          <View
+            style={[
+              styles.skeletonLine,
+              { width: "58%", height: 15, backgroundColor: skeletonColor },
+            ]}
+          />
+          <View
+            style={[
+              styles.skeletonLine,
+              { width: "82%", height: 11, marginTop: 9, backgroundColor: skeletonColor },
+            ]}
+          />
+        </View>
+      </View>
+
+      <ScrollView
+        horizontal
+        scrollEnabled={false}
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.cardsContainer}
+      >
+        {[0, 1, 2].map((item) => (
+          <View
+            key={item}
+            style={[
+              styles.personCard,
+              {
+                backgroundColor: colors.surface,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <View
+              style={[
+                styles.skeletonCircle,
+                { width: 72, height: 72, borderRadius: 36, backgroundColor: skeletonColor },
+              ]}
+            />
+            <View
+              style={[
+                styles.skeletonLine,
+                { width: 92, height: 13, marginTop: 14, backgroundColor: skeletonColor },
+              ]}
+            />
+            <View
+              style={[
+                styles.skeletonLine,
+                { width: 68, height: 10, marginTop: 8, backgroundColor: skeletonColor },
+              ]}
+            />
+            <View
+              style={[
+                styles.skeletonLine,
+                { width: "100%", height: 38, marginTop: 16, backgroundColor: skeletonColor },
+              ]}
+            />
+          </View>
+        ))}
+      </ScrollView>
+
+      <View style={[styles.divider, { backgroundColor: colors.border }]} />
+
+      <View
+        style={[
+          styles.skeletonLine,
+          {
+            width: 110,
+            height: 12,
+            marginLeft: spacing.lg,
+            marginBottom: 14,
+            backgroundColor: skeletonColor,
+          },
+        ]}
+      />
+
+      {[0, 1, 2, 3].map((item) => (
+        <View key={item} style={styles.skeletonUserRow}>
+          <View
+            style={[
+              styles.skeletonCircle,
+              { width: 52, height: 52, borderRadius: 26, backgroundColor: skeletonColor },
+            ]}
+          />
+          <View style={{ flex: 1, marginLeft: 14 }}>
+            <View
+              style={[
+                styles.skeletonLine,
+                {
+                  width: item % 2 === 0 ? "52%" : "40%",
+                  height: 14,
+                  backgroundColor: skeletonColor,
+                },
+              ]}
+            />
+            <View
+              style={[
+                styles.skeletonLine,
+                {
+                  width: item % 2 === 0 ? "72%" : "58%",
+                  height: 10,
+                  marginTop: 9,
+                  backgroundColor: skeletonColor,
+                },
+              ]}
+            />
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   searchBox: {
     flexDirection: "row",
@@ -566,6 +691,21 @@ const styles = StyleSheet.create({
   empty: {
     padding: spacing.xxl,
     alignItems: "center",
+  },
+
+  skeletonLine: {
+    borderRadius: 999,
+  },
+
+  skeletonCircle: {
+    flexShrink: 0,
+  },
+
+  skeletonUserRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: spacing.lg,
+    paddingVertical: 12,
   },
 
   recentLoading: {

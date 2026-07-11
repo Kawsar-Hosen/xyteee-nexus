@@ -9,6 +9,8 @@ import os
 import uuid
 import logging
 import asyncio
+import smtplib
+from email.message import EmailMessage
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Dict, Any, Set
@@ -42,6 +44,12 @@ JWT_SECRET = os.environ["JWT_SECRET"]
 JWT_ALGORITHM = os.environ.get("JWT_ALGORITHM", "HS256")
 JWT_EXPIRE_DAYS = int(os.environ.get("JWT_EXPIRE_DAYS", "7"))
 
+SMTP_HOST = os.environ.get("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
+SMTP_EMAIL = os.environ.get("SMTP_EMAIL", "")
+SMTP_APP_PASSWORD = os.environ.get("SMTP_APP_PASSWORD", "")
+SMTP_FROM_NAME = os.environ.get("SMTP_FROM_NAME", "XYTEEE Nexus")
+
 sb: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
 logging.basicConfig(
@@ -58,6 +66,48 @@ api = APIRouter(prefix="/api")
 async def run(fn):
     """Run a sync Supabase call in a thread pool so the event loop stays free."""
     return await asyncio.to_thread(fn)
+
+
+# ── Email helper ───────────────────────────────────────────────────────────────
+def _send_email_sync(
+    to_email: str,
+    subject: str,
+    body: str,
+    html: Optional[str] = None,
+) -> None:
+    if not SMTP_EMAIL or not SMTP_APP_PASSWORD:
+        raise RuntimeError("SMTP email credentials are not configured")
+
+    message = EmailMessage()
+    message["From"] = f"{SMTP_FROM_NAME} <{SMTP_EMAIL}>"
+    message["To"] = to_email
+    message["Subject"] = subject
+    message.set_content(body)
+
+    if html:
+        message.add_alternative(html, subtype="html")
+
+    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20) as smtp:
+        smtp.ehlo()
+        smtp.starttls()
+        smtp.ehlo()
+        smtp.login(SMTP_EMAIL, SMTP_APP_PASSWORD)
+        smtp.send_message(message)
+
+
+async def send_email(
+    to_email: str,
+    subject: str,
+    body: str,
+    html: Optional[str] = None,
+) -> None:
+    await asyncio.to_thread(
+        _send_email_sync,
+        to_email,
+        subject,
+        body,
+        html,
+    )
 
 
 # ── Utils ──────────────────────────────────────────────────────────────────────
@@ -163,7 +213,38 @@ async def _send_expo_push(to_user: str, kind: str, data: dict):
         "friend_request": "New friend request",
         "friend_accepted": "Friend request accepted",
         "message": "New message",
+        "voice_call": "Incoming voice call",
         "story": "New story notification",
+        "circle_invite": "New Circle invitation",
+        "circle_invite_accepted": "Circle invitation accepted",
+        "circle_invite_rejected": "Circle invitation declined",
+        "circle_member_removed": "Removed from Circle",
+        "circle_message_reaction": "Message reaction",
+        "message_reaction": "Message reaction",
+        "story_reaction": "Story reaction",
+        "account_moderated": "Account suspended" if data.get("status") == "suspended" else "Account banned",
+        "account_restored": "Account restored",
+        "circle_message": data.get("circle_name") or "Circle message",
+    }
+
+    from_name = data.get("from_name") or "Someone"
+
+    body_map = {
+        "friend_request": f"{from_name} sent you a friend request",
+        "friend_accepted": f"{from_name} accepted your friend request",
+        "message": f"{from_name}: {data.get('preview') or 'Sent you a message'}",
+        "voice_call": f"{from_name} is calling you",
+        "story": f"{from_name} added a new story",
+        "circle_invite": f"{from_name} invited you to {data.get('circle_name') or 'a Circle'}",
+        "circle_invite_accepted": f"{from_name} accepted your invitation to {data.get('circle_name') or 'the Circle'}",
+        "circle_invite_rejected": f"{from_name} declined your invitation to {data.get('circle_name') or 'the Circle'}",
+        "circle_member_removed": f"You were removed from {data.get('circle_name') or 'a Circle'}",
+        "circle_message_reaction": f"{from_name} reacted {data.get('emoji') or '❤️'} to your Circle message",
+        "message_reaction": f"{from_name} reacted {data.get('emoji') or '❤️'} to your message",
+        "story_reaction": f"{from_name} reacted {data.get('emoji') or '❤️'} to your story",
+        "account_moderated": data.get("reason") or "Your account status has been updated",
+        "account_restored": "Your account has been restored. You can use Nexus again.",
+        "circle_message": f"{from_name}: {data.get('preview') or 'Sent a message'}",
     }
 
     messages = [
@@ -171,18 +252,21 @@ async def _send_expo_push(to_user: str, kind: str, data: dict):
             "to": token,
             "sound": "default",
             "title": title_map.get(kind, "XYTEEE Nexus"),
-            "body": data.get("message") or data.get("body") or "You have a new notification",
+            "body": data.get("message") or data.get("body") or body_map.get(kind, "You have a new notification"),
             "data": {"kind": kind, **jsonable(data)},
         }
         for token in tokens
     ]
 
     async with httpx.AsyncClient(timeout=10) as client:
-        await client.post(
+        response = await client.post(
             "https://exp.host/--/api/v2/push/send",
             json=messages,
             headers={"Content-Type": "application/json"},
         )
+        response.raise_for_status()
+        result = response.json()
+        logger.info("Expo push response for %s: %s", to_user, result)
 
 
 # ── Auth dependency ────────────────────────────────────────────────────────────
@@ -280,6 +364,9 @@ class Hub:
 
 hub = Hub()
 
+# Pending voice-call offers for users who open the app from a push notification.
+pending_voice_calls: Dict[str, dict] = {}
+
 
 async def broadcast_to_user(user_id: str, payload: dict):
     await hub.send(user_id, jsonable(payload))
@@ -296,6 +383,10 @@ class SignUpIn(BaseModel):
 class LoginIn(BaseModel):
     email: EmailStr
     password: str
+
+
+class GoogleAuthIn(BaseModel):
+    id_token: str
 
 
 class ForgotIn(BaseModel):
@@ -336,6 +427,37 @@ class MessageIn(BaseModel):
     media: Optional[str] = None
     file_name: Optional[str] = None
     reply_to: Optional[str] = None
+
+
+class CircleCreateIn(BaseModel):
+    name: str
+    description: str = ""
+    photo: Optional[str] = None
+    privacy: str = "public"
+
+
+class CircleUpdateIn(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    photo: Optional[str] = None
+    privacy: Optional[str] = None
+
+
+class CircleThemeIn(BaseModel):
+    theme: str
+
+
+class CircleMessageIn(BaseModel):
+    circle_id: str
+    content: str = ""
+    kind: str = "text"
+    media: Optional[str] = None
+    reply_to: Optional[str] = None
+
+
+class CircleInviteIn(BaseModel):
+    user_id: str
+
 
 
 class MessageEdit(BaseModel):
@@ -431,7 +553,6 @@ async def signup(body: SignUpIn):
         raise HTTPException(status_code=400, detail="Username already taken")
 
     user_id = make_id("usr")
-    verify_tok = uuid.uuid4().hex
     doc = {
         "user_id": user_id,
         "email": email,
@@ -442,8 +563,8 @@ async def signup(body: SignUpIn):
         "profile_picture": "",
         "cover_picture": "",
         "is_private": False,
-        "email_verified": False,
-        "email_verify_token": verify_tok,
+        "email_verified": True,
+        "email_verify_token": None,
         "provider": "email",
         "online": False,
         "last_seen": ts(now_utc()),
@@ -452,7 +573,196 @@ async def signup(body: SignUpIn):
     await run(lambda: sb.table("users").insert(doc).execute())
     token = create_jwt(user_id)
     user = await get_user_public(user_id)
-    return {"token": token, "user": user, "verify_token": verify_tok}
+
+    try:
+        welcome_name = body.display_name.strip() or body.username
+
+        welcome_plain = f"""Welcome to XYTEEE Nexus, {welcome_name}!
+
+Your account has been created successfully and is ready to use.
+
+Discover your Nexus, connect with people, and make it yours.
+
+If you did not create this account, please contact XYTEEE Nexus support.
+
+— XYTEEE Nexus"""
+
+        welcome_html = f"""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin:0;padding:0;background:#F4F1EB;font-family:Arial,Helvetica,sans-serif;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#F4F1EB;">
+    <tr>
+      <td align="center" style="padding:18px 10px;">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:500px;background:#FFFFFF;border:1px solid #E4DED3;border-radius:20px;overflow:hidden;">
+          <tr>
+            <td style="padding:24px 24px 12px;text-align:center;">
+              <div style="font-family:Georgia,serif;font-size:25px;font-weight:bold;color:#171513;letter-spacing:2px;">
+                XYTEEE
+              </div>
+              <div style="margin-top:3px;font-size:9px;font-weight:bold;color:#B47B42;letter-spacing:5px;">
+                NEXUS
+              </div>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:12px 24px 24px;text-align:center;">
+              <div style="display:inline-block;padding:7px 12px;background:#F7F1E8;border-radius:999px;font-size:10px;font-weight:bold;color:#A46E38;letter-spacing:1px;">
+                ACCOUNT READY
+              </div>
+
+              <h1 style="margin:14px 0 0;font-family:Georgia,serif;font-size:28px;line-height:1.15;color:#171513;">
+                Welcome, {welcome_name}
+              </h1>
+
+              <p style="margin:10px 0 0;font-size:13px;line-height:20px;color:#716B63;">
+                Your XYTEEE Nexus account has been created successfully. Your space is ready.
+              </p>
+
+              <div style="margin:18px 0;padding:16px;background:#FAF8F4;border:1px solid #E9E3D9;border-radius:14px;">
+                <div style="font-size:13px;font-weight:bold;color:#292521;">
+                  Your Nexus starts here
+                </div>
+                <div style="margin-top:6px;font-size:11px;line-height:17px;color:#7B746B;">
+                  Discover people, build connections, share moments, and make your Nexus your own.
+                </div>
+              </div>
+
+              <p style="margin:0;font-size:11px;line-height:17px;color:#938B81;">
+                If you did not create this account, please contact XYTEEE Nexus support.
+              </p>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:14px 20px;background:#171513;text-align:center;">
+              <div style="font-size:12px;font-weight:bold;color:#F4F1EB;">XYTEEE Nexus</div>
+              <div style="margin-top:3px;font-size:9px;color:#A9A198;">Your Nexus. Your space.</div>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>"""
+
+        await send_email(
+            email,
+            "Welcome to XYTEEE Nexus",
+            welcome_plain,
+            welcome_html,
+        )
+    except Exception:
+        logger.exception("Failed to send signup welcome email")
+
+    return {"token": token, "user": user}
+
+
+@api.post("/auth/google")
+async def google_auth(body: GoogleAuthIn):
+    google_client_id = os.environ.get("GOOGLE_WEB_CLIENT_ID", "").strip()
+
+    if not google_client_id:
+        raise HTTPException(status_code=500, detail="Google Sign-In is not configured")
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        response = await client.get(
+            "https://oauth2.googleapis.com/tokeninfo",
+            params={"id_token": body.id_token},
+        )
+
+    if response.status_code != 200:
+        raise HTTPException(status_code=401, detail="Invalid Google token")
+
+    info = response.json()
+
+    if info.get("aud") != google_client_id:
+        raise HTTPException(status_code=401, detail="Invalid Google token audience")
+
+    email = str(info.get("email") or "").strip().lower()
+    email_verified = str(info.get("email_verified") or "").lower() == "true"
+    display_name = str(info.get("name") or "").strip() or "Nexus User"
+    profile_picture = str(info.get("picture") or "").strip()
+
+    if not email or not email_verified:
+        raise HTTPException(status_code=401, detail="Google email is not verified")
+
+    existing_r = await run(
+        lambda: sb.table("users").select("*").eq("email", email).execute()
+    )
+
+    if existing_r.data:
+        existing = existing_r.data[0]
+        user_id = existing["user_id"]
+
+        await run(
+            lambda: sb.table("users")
+            .update({
+                "email_verified": True,
+                "online": True,
+                "last_seen": ts(now_utc()),
+            })
+            .eq("user_id", user_id)
+            .execute()
+        )
+
+        token = create_jwt(user_id)
+        user = await get_user_public(user_id)
+        return {"token": token, "user": user, "is_new_user": False}
+
+    username_base = "".join(
+        ch for ch in email.split("@")[0].lower()
+        if ch.isalnum() or ch in "._"
+    )[:20] or "nexus"
+
+    username = username_base
+    counter = 1
+
+    while True:
+        username_r = await run(
+            lambda: sb.table("users")
+            .select("user_id")
+            .eq("username", username)
+            .execute()
+        )
+
+        if not username_r.data:
+            break
+
+        suffix = str(counter)
+        username = f"{username_base[:24 - len(suffix)]}{suffix}"
+        counter += 1
+
+    user_id = make_id("usr")
+    doc = {
+        "user_id": user_id,
+        "email": email,
+        "username": username,
+        "display_name": display_name[:48],
+        "password_hash": None,
+        "bio": "",
+        "profile_picture": profile_picture,
+        "cover_picture": "",
+        "is_private": False,
+        "email_verified": True,
+        "email_verify_token": None,
+        "provider": "google",
+        "online": True,
+        "last_seen": ts(now_utc()),
+        "created_at": ts(now_utc()),
+    }
+
+    await run(lambda: sb.table("users").insert(doc).execute())
+
+    token = create_jwt(user_id)
+    user = await get_user_public(user_id)
+
+    return {"token": token, "user": user, "is_new_user": True}
 
 
 @api.post("/auth/login")
@@ -676,16 +986,106 @@ async def forgot_password(body: ForgotIn):
     if not r.data:
         return {"ok": True}  # don't reveal existence
     uid = r.data[0]["user_id"]
-    tok = uuid.uuid4().hex
-    expiry = ts(now_utc() + timedelta(hours=1))
+    tok = f"{int.from_bytes(os.urandom(4), 'big') % 1000000:06d}"
+    expiry = ts(now_utc() + timedelta(minutes=15))
+
     await run(lambda: sb.table("users")
         .update({"password_reset_token": tok, "password_reset_expiry": expiry})
         .eq("user_id", uid).execute())
-    # Token is stored in DB only. To deliver it to the user:
-    # - Set up email delivery (SendGrid / Resend) and send reset link, OR
-    # - Admin can look up the token via /admin/users/{id}/reset-token.
-    # Never return the token in this response — doing so allows account takeover
-    # by any caller who knows the victim's email address.
+
+    try:
+        plain_body = f"""Your XYTEEE Nexus password reset code is:
+
+{tok}
+
+This code expires in 15 minutes.
+
+If you did not request a password reset, you can ignore this email.
+
+— XYTEEE Nexus"""
+
+        html_body = f"""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin:0;padding:0;background:#08080A;font-family:Arial,Helvetica,sans-serif;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#08080A;">
+    <tr>
+      <td align="center" style="padding:14px 10px;">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:500px;background:#121216;border:1px solid #29272F;border-radius:20px;overflow:hidden;">
+          <tr>
+            <td style="padding:22px 24px 10px;text-align:center;">
+              <div style="font-family:Georgia,serif;font-size:25px;font-weight:bold;color:#F1EFE7;letter-spacing:2px;">
+                XYTEEE
+              </div>
+              <div style="margin-top:3px;font-size:9px;font-weight:bold;color:#D9AE78;letter-spacing:5px;">
+                NEXUS
+              </div>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:10px 24px 22px;">
+              <h1 style="margin:0;text-align:center;font-family:Georgia,serif;font-size:27px;line-height:1.15;color:#F1EFE7;">
+                Reset access
+              </h1>
+
+              <p style="margin:8px 0 0;text-align:center;font-size:13px;line-height:19px;color:#98959F;">
+                Use this verification code to choose a new password for your Nexus account.
+              </p>
+
+              <div style="margin:18px 0;padding:16px 10px;background:#0B0B0E;border:1px solid #35313A;border-radius:14px;text-align:center;">
+                <div style="font-size:9px;font-weight:bold;color:#98959F;letter-spacing:3px;">
+                  RESET CODE
+                </div>
+                <div style="margin-top:8px;font-size:32px;font-weight:bold;color:#D9AE78;letter-spacing:6px;">
+                  {tok}
+                </div>
+              </div>
+
+              <p style="margin:0;text-align:center;font-size:13px;line-height:19px;color:#F1EFE7;">
+                This code expires in <strong style="color:#D9AE78;">15 minutes</strong>.
+              </p>
+
+              <div style="margin-top:18px;padding-top:16px;border-top:1px solid #29272F;">
+                <p style="margin:0;text-align:center;font-size:11px;line-height:17px;color:#77747E;">
+                  If you did not request a password reset, you can safely ignore this email. Never share this code with anyone.
+                </p>
+              </div>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:14px 20px;background:#0D0D10;text-align:center;border-top:1px solid #29272F;">
+              <div style="font-size:12px;font-weight:bold;color:#F1EFE7;">XYTEEE Nexus</div>
+              <div style="margin-top:3px;font-size:9px;color:#6F6C75;">Your Nexus is right where you left it.</div>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>"""
+
+        await send_email(
+            email,
+            "Your XYTEEE Nexus password reset code",
+            plain_body,
+            html_body,
+        )
+    except Exception:
+        logger.exception("Failed to send password reset email")
+        await run(lambda: sb.table("users")
+            .update({"password_reset_token": None, "password_reset_expiry": None})
+            .eq("user_id", uid).execute())
+        raise HTTPException(
+            status_code=503,
+            detail="Could not send the verification code. Please try again."
+        )
+
     return {"ok": True}
 
 
@@ -975,6 +1375,27 @@ async def users_blocked(a: str, b: str) -> bool:
     return bool(r.data)
 
 
+async def blocked_user_ids(user_id: str) -> Set[str]:
+    r = await run(
+        lambda: sb.table("blocks")
+        .select("blocker,blocked")
+        .or_(f"blocker.eq.{user_id},blocked.eq.{user_id}")
+        .execute()
+    )
+    blocked_ids: Set[str] = set()
+
+    for row in (r.data or []):
+        blocker = row.get("blocker")
+        blocked = row.get("blocked")
+
+        if blocker == user_id and blocked:
+            blocked_ids.add(blocked)
+        elif blocked == user_id and blocker:
+            blocked_ids.add(blocker)
+
+    return blocked_ids
+
+
 async def ensure_private_access(viewer_id: str, owner_id: str):
     if viewer_id == owner_id:
         return
@@ -1168,6 +1589,1060 @@ async def blocks_list(user=Depends(current_user)):
     return {"blocked": [public_user(u) for u in ur.data]}
 
 
+
+# ── Circles ────────────────────────────────────────────────────────────────────
+@api.post("/circles")
+async def create_circle(body: CircleCreateIn, user=Depends(current_user)):
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Circle name is required")
+
+    if len(name) > 80:
+        raise HTTPException(status_code=400, detail="Circle name is too long")
+
+    privacy = body.privacy.strip().lower()
+    if privacy not in ("public", "private"):
+        raise HTTPException(status_code=400, detail="Invalid Circle privacy")
+
+    circle_id = make_id("circle")
+    now = ts(now_utc())
+
+    circle = {
+        "circle_id": circle_id,
+        "name": name,
+        "description": body.description.strip(),
+        "photo": body.photo,
+        "owner_id": user["user_id"],
+        "privacy": privacy,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+    await run(lambda: sb.table("circles").insert(circle).execute())
+
+    await run(
+        lambda: sb.table("circle_members").insert({
+            "circle_id": circle_id,
+            "user_id": user["user_id"],
+            "role": "owner",
+            "joined_at": now,
+        }).execute()
+    )
+
+    circle["my_role"] = "owner"
+    circle["member_count"] = 1
+    return {"circle": circle}
+
+
+@api.get("/circles")
+async def list_my_circles(user=Depends(current_user)):
+    mr = await run(
+        lambda: sb.table("circle_members")
+        .select("circle_id,role,joined_at")
+        .eq("user_id", user["user_id"])
+        .execute()
+    )
+
+    memberships = mr.data or []
+    if not memberships:
+        return {"circles": []}
+
+    circle_ids = [m["circle_id"] for m in memberships]
+
+    cr = await run(
+        lambda: sb.table("circles")
+        .select("*")
+        .in_("circle_id", circle_ids)
+        .order("updated_at", desc=True)
+        .execute()
+    )
+
+    role_map = {m["circle_id"]: m["role"] for m in memberships}
+    out = []
+
+    for circle in (cr.data or []):
+        count_r = await run(
+            lambda cid=circle["circle_id"]: sb.table("circle_members")
+            .select("user_id", count="exact")
+            .eq("circle_id", cid)
+            .execute()
+        )
+
+        circle["my_role"] = role_map.get(circle["circle_id"], "member")
+        circle["member_count"] = count_r.count or 0
+        out.append(circle)
+
+    return {"circles": out}
+
+
+@api.get("/circles/{circle_id}")
+async def get_circle(circle_id: str, user=Depends(current_user)):
+    mr = await run(
+        lambda: sb.table("circle_members")
+        .select("role")
+        .eq("circle_id", circle_id)
+        .eq("user_id", user["user_id"])
+        .execute()
+    )
+
+    if not mr.data:
+        raise HTTPException(status_code=403, detail="You are not a member of this Circle")
+
+    cr = await run(
+        lambda: sb.table("circles")
+        .select("*")
+        .eq("circle_id", circle_id)
+        .execute()
+    )
+
+    if not cr.data:
+        raise HTTPException(status_code=404, detail="Circle not found")
+
+    count_r = await run(
+        lambda: sb.table("circle_members")
+        .select("user_id", count="exact")
+        .eq("circle_id", circle_id)
+        .execute()
+    )
+
+    circle = cr.data[0]
+    circle["my_role"] = mr.data[0]["role"]
+    circle["member_count"] = count_r.count or 0
+
+    return {"circle": circle}
+
+
+
+@api.put("/circles/{circle_id}")
+async def update_circle(
+    circle_id: str,
+    body: CircleUpdateIn,
+    user=Depends(current_user),
+):
+    member_r = await run(
+        lambda: sb.table("circle_members")
+        .select("role")
+        .eq("circle_id", circle_id)
+        .eq("user_id", user["user_id"])
+        .execute()
+    )
+
+    if not member_r.data:
+        raise HTTPException(status_code=403, detail="You are not a member of this Circle")
+
+    if member_r.data[0]["role"] not in ("owner", "admin"):
+        raise HTTPException(status_code=403, detail="Only owners and admins can edit this Circle")
+
+    updates = {}
+
+    if body.name is not None:
+        name = body.name.strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="Circle name is required")
+        if len(name) > 80:
+            raise HTTPException(status_code=400, detail="Circle name is too long")
+        updates["name"] = name
+
+    if body.description is not None:
+        updates["description"] = body.description.strip()
+
+    if body.photo is not None:
+        updates["photo"] = body.photo
+
+    if body.privacy is not None:
+        privacy = body.privacy.strip().lower()
+        if privacy not in ("public", "private"):
+            raise HTTPException(status_code=400, detail="Invalid Circle privacy")
+        updates["privacy"] = privacy
+
+    if not updates:
+        raise HTTPException(status_code=400, detail="No changes provided")
+
+    updates["updated_at"] = ts(now_utc())
+
+    updated_r = await run(
+        lambda: sb.table("circles")
+        .update(updates)
+        .eq("circle_id", circle_id)
+        .execute()
+    )
+
+    if not updated_r.data:
+        raise HTTPException(status_code=404, detail="Circle not found")
+
+    circle = updated_r.data[0]
+    circle["my_role"] = member_r.data[0]["role"]
+
+    count_r = await run(
+        lambda: sb.table("circle_members")
+        .select("user_id", count="exact")
+        .eq("circle_id", circle_id)
+        .execute()
+    )
+    circle["member_count"] = count_r.count or 0
+
+    return {"circle": circle}
+
+
+@api.put("/circles/{circle_id}/theme")
+async def update_circle_theme(
+    circle_id: str,
+    body: CircleThemeIn,
+    user=Depends(current_user),
+):
+    allowed_themes = {
+        "default",
+        "classic",
+        "midnight",
+        "ocean",
+        "sunset",
+        "forest",
+        "aurora",
+        "rose",
+        "violet",
+        "gold",
+        "cyber",
+        "sky",
+        "ember",
+        "mint",
+        "sakura",
+        "monochrome",
+    }
+
+    theme = body.theme.strip().lower()
+
+    if theme not in allowed_themes:
+        raise HTTPException(status_code=400, detail="Invalid Circle theme")
+
+    member_r = await run(
+        lambda: sb.table("circle_members")
+        .select("role")
+        .eq("circle_id", circle_id)
+        .eq("user_id", user["user_id"])
+        .execute()
+    )
+
+    if not member_r.data:
+        raise HTTPException(
+            status_code=403,
+            detail="You are not a member of this Circle",
+        )
+
+    updated_r = await run(
+        lambda: sb.table("circles")
+        .update({
+            "theme": theme,
+            "updated_at": ts(now_utc()),
+        })
+        .eq("circle_id", circle_id)
+        .execute()
+    )
+
+    if not updated_r.data:
+        raise HTTPException(status_code=404, detail="Circle not found")
+
+    members_r = await run(
+        lambda: sb.table("circle_members")
+        .select("user_id")
+        .eq("circle_id", circle_id)
+        .execute()
+    )
+
+    for member in (members_r.data or []):
+        await broadcast_to_user(
+            member["user_id"],
+            {
+                "type": "circle_theme_update",
+                "circle_id": circle_id,
+                "theme": theme,
+                "changed_by": user["user_id"],
+            },
+        )
+
+    return {"theme": theme}
+
+
+@api.get("/circles/{circle_id}/members")
+async def list_circle_members(circle_id: str, user=Depends(current_user)):
+    my_r = await run(
+        lambda: sb.table("circle_members")
+        .select("role")
+        .eq("circle_id", circle_id)
+        .eq("user_id", user["user_id"])
+        .execute()
+    )
+
+    if not my_r.data:
+        raise HTTPException(status_code=403, detail="You are not a member of this Circle")
+
+    members_r = await run(
+        lambda: sb.table("circle_members")
+        .select("user_id,role,joined_at")
+        .eq("circle_id", circle_id)
+        .order("joined_at")
+        .execute()
+    )
+
+    memberships = members_r.data or []
+    user_ids = [member["user_id"] for member in memberships]
+
+    users_map = {}
+    if user_ids:
+        users_r = await run(
+            lambda: sb.table("users")
+            .select("*")
+            .in_("user_id", user_ids)
+            .execute()
+        )
+        users_map = {
+            u["user_id"]: public_user(u)
+            for u in (users_r.data or [])
+        }
+
+    members = []
+    for membership in memberships:
+        member = dict(membership)
+        member["user"] = users_map.get(membership["user_id"])
+        members.append(member)
+
+    role_order = {"owner": 0, "admin": 1, "member": 2}
+    members.sort(key=lambda item: role_order.get(item["role"], 3))
+
+    return {
+        "members": members,
+        "my_role": my_r.data[0]["role"],
+    }
+
+
+@api.post("/circles/{circle_id}/invite")
+async def invite_circle_member(
+    circle_id: str,
+    body: CircleInviteIn,
+    user=Depends(current_user),
+):
+    inviter_r = await run(
+        lambda: sb.table("circle_members")
+        .select("role")
+        .eq("circle_id", circle_id)
+        .eq("user_id", user["user_id"])
+        .execute()
+    )
+
+    if not inviter_r.data:
+        raise HTTPException(
+            status_code=403,
+            detail="You are not a member of this Circle"
+        )
+
+    if body.user_id == user["user_id"]:
+        raise HTTPException(status_code=400, detail="You cannot invite yourself")
+
+    target_r = await run(
+        lambda: sb.table("users")
+        .select("*")
+        .eq("user_id", body.user_id)
+        .execute()
+    )
+
+    if not target_r.data:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    existing_r = await run(
+        lambda: sb.table("circle_members")
+        .select("user_id")
+        .eq("circle_id", circle_id)
+        .eq("user_id", body.user_id)
+        .execute()
+    )
+
+    if existing_r.data:
+        return {
+            "invited": False,
+            "already_member": True,
+        }
+
+    pending_r = await run(
+        lambda: sb.table("notifications")
+        .select("notif_id")
+        .eq("user_id", body.user_id)
+        .eq("kind", "circle_invite")
+        .contains("data", {"circle_id": circle_id})
+        .limit(1)
+        .execute()
+    )
+
+    if pending_r.data:
+        return {
+            "invited": False,
+            "already_pending": True,
+        }
+
+    circle_r = await run(
+        lambda: sb.table("circles")
+        .select("name,photo")
+        .eq("circle_id", circle_id)
+        .execute()
+    )
+    circle_data = circle_r.data[0] if circle_r.data else {}
+
+    await _push_notification(
+        body.user_id,
+        "circle_invite",
+        {
+            "from": user["user_id"],
+            "from_name": user.get("display_name", ""),
+            "circle_id": circle_id,
+            "circle_name": circle_data.get("name", "Circle"),
+            "circle_photo": circle_data.get("photo"),
+        },
+    )
+
+    return {
+        "invited": True,
+        "already_member": False,
+        "already_pending": False,
+    }
+
+
+@api.post("/circles/invites/{notif_id}/accept")
+async def accept_circle_invite(
+    notif_id: str,
+    user=Depends(current_user),
+):
+    notif_r = await run(
+        lambda: sb.table("notifications")
+        .select("*")
+        .eq("notif_id", notif_id)
+        .eq("user_id", user["user_id"])
+        .eq("kind", "circle_invite")
+        .execute()
+    )
+
+    if not notif_r.data:
+        raise HTTPException(status_code=404, detail="Circle invitation not found")
+
+    notif = notif_r.data[0]
+    circle_id = (notif.get("data") or {}).get("circle_id")
+
+    if not circle_id:
+        raise HTTPException(status_code=400, detail="Invalid Circle invitation")
+
+    circle_r = await run(
+        lambda: sb.table("circles")
+        .select("circle_id")
+        .eq("circle_id", circle_id)
+        .execute()
+    )
+
+    if not circle_r.data:
+        raise HTTPException(status_code=404, detail="Circle not found")
+
+    existing_r = await run(
+        lambda: sb.table("circle_members")
+        .select("user_id")
+        .eq("circle_id", circle_id)
+        .eq("user_id", user["user_id"])
+        .execute()
+    )
+
+    if not existing_r.data:
+        await run(
+            lambda: sb.table("circle_members").insert({
+                "circle_id": circle_id,
+                "user_id": user["user_id"],
+                "role": "member",
+                "joined_at": ts(now_utc()),
+            }).execute()
+        )
+
+    await run(
+        lambda: sb.table("notifications")
+        .delete()
+        .eq("notif_id", notif_id)
+        .eq("user_id", user["user_id"])
+        .execute()
+    )
+
+    await run(
+        lambda: sb.table("circles")
+        .update({"updated_at": ts(now_utc())})
+        .eq("circle_id", circle_id)
+        .execute()
+    )
+
+    invite_data = notif.get("data") or {}
+    inviter_id = invite_data.get("from")
+
+    if inviter_id and inviter_id != user["user_id"]:
+        await _push_notification(
+            inviter_id,
+            "circle_invite_accepted",
+            {
+                "from": user["user_id"],
+                "from_name": user.get("display_name", ""),
+                "circle_id": circle_id,
+                "circle_name": invite_data.get("circle_name", "Circle"),
+            },
+        )
+
+    return {"accepted": True, "circle_id": circle_id}
+
+
+@api.post("/circles/invites/{notif_id}/reject")
+async def reject_circle_invite(
+    notif_id: str,
+    user=Depends(current_user),
+):
+    notif_r = await run(
+        lambda: sb.table("notifications")
+        .select("notif_id,data")
+        .eq("notif_id", notif_id)
+        .eq("user_id", user["user_id"])
+        .eq("kind", "circle_invite")
+        .execute()
+    )
+
+    if not notif_r.data:
+        raise HTTPException(status_code=404, detail="Circle invitation not found")
+
+    invite_data = notif_r.data[0].get("data") or {}
+
+    await run(
+        lambda: sb.table("notifications")
+        .delete()
+        .eq("notif_id", notif_id)
+        .eq("user_id", user["user_id"])
+        .execute()
+    )
+
+    inviter_id = invite_data.get("from")
+
+    if inviter_id and inviter_id != user["user_id"]:
+        await _push_notification(
+            inviter_id,
+            "circle_invite_rejected",
+            {
+                "from": user["user_id"],
+                "from_name": user.get("display_name", ""),
+                "circle_id": invite_data.get("circle_id"),
+                "circle_name": invite_data.get("circle_name", "Circle"),
+            },
+        )
+
+    return {"rejected": True}
+
+
+@api.delete("/circles/{circle_id}/members/{user_id}")
+async def remove_circle_member(
+    circle_id: str,
+    user_id: str,
+    user=Depends(current_user),
+):
+    my_r = await run(
+        lambda: sb.table("circle_members")
+        .select("role")
+        .eq("circle_id", circle_id)
+        .eq("user_id", user["user_id"])
+        .execute()
+    )
+
+    if not my_r.data or my_r.data[0]["role"] not in ("owner", "admin"):
+        raise HTTPException(status_code=403, detail="Not allowed")
+
+    target_r = await run(
+        lambda: sb.table("circle_members")
+        .select("role")
+        .eq("circle_id", circle_id)
+        .eq("user_id", user_id)
+        .execute()
+    )
+
+    if not target_r.data:
+        raise HTTPException(status_code=404, detail="Member not found")
+
+    if target_r.data[0]["role"] == "owner":
+        raise HTTPException(status_code=400, detail="Circle owner cannot be removed")
+
+    circle_r = await run(
+        lambda: sb.table("circles")
+        .select("name")
+        .eq("circle_id", circle_id)
+        .limit(1)
+        .execute()
+    )
+    circle_name = (
+        circle_r.data[0].get("name", "Circle")
+        if circle_r.data
+        else "Circle"
+    )
+
+    await run(
+        lambda: sb.table("circle_members")
+        .delete()
+        .eq("circle_id", circle_id)
+        .eq("user_id", user_id)
+        .execute()
+    )
+
+    await _push_notification(
+        user_id,
+        "circle_member_removed",
+        {
+            "from": user["user_id"],
+            "from_name": user.get("display_name", ""),
+            "circle_id": circle_id,
+            "circle_name": circle_name,
+        },
+    )
+
+    return {"removed": True}
+
+
+@api.delete("/circles/{circle_id}")
+async def delete_circle_permanently(
+    circle_id: str,
+    user=Depends(current_user),
+):
+    circle_r = await run(
+        lambda: sb.table("circles")
+        .select("circle_id,owner_id")
+        .eq("circle_id", circle_id)
+        .execute()
+    )
+
+    if not circle_r.data:
+        raise HTTPException(status_code=404, detail="Circle not found")
+
+    if circle_r.data[0]["owner_id"] != user["user_id"]:
+        raise HTTPException(
+            status_code=403,
+            detail="Only the Circle owner can permanently delete this Circle"
+        )
+
+    await run(
+        lambda: sb.table("circle_messages")
+        .delete()
+        .eq("circle_id", circle_id)
+        .execute()
+    )
+
+    await run(
+        lambda: sb.table("circle_members")
+        .delete()
+        .eq("circle_id", circle_id)
+        .execute()
+    )
+
+    await run(
+        lambda: sb.table("notifications")
+        .delete()
+        .eq("kind", "circle_invite")
+        .contains("data", {"circle_id": circle_id})
+        .execute()
+    )
+
+    await run(
+        lambda: sb.table("circles")
+        .delete()
+        .eq("circle_id", circle_id)
+        .eq("owner_id", user["user_id"])
+        .execute()
+    )
+
+    return {"deleted": True, "circle_id": circle_id}
+
+
+@api.post("/circles/{circle_id}/leave")
+async def leave_circle(
+    circle_id: str,
+    user=Depends(current_user),
+):
+    member_r = await run(
+        lambda: sb.table("circle_members")
+        .select("role")
+        .eq("circle_id", circle_id)
+        .eq("user_id", user["user_id"])
+        .execute()
+    )
+
+    if not member_r.data:
+        raise HTTPException(status_code=404, detail="You are not a member of this Circle")
+
+    if member_r.data[0]["role"] == "owner":
+        raise HTTPException(
+            status_code=400,
+            detail="Transfer ownership before leaving this Circle"
+        )
+
+    await run(
+        lambda: sb.table("circle_members")
+        .delete()
+        .eq("circle_id", circle_id)
+        .eq("user_id", user["user_id"])
+        .execute()
+    )
+
+    return {"left": True}
+
+
+@api.get("/circles/{circle_id}/messages")
+async def list_circle_messages(
+    circle_id: str,
+    limit: int = 100,
+    user=Depends(current_user),
+):
+    member_r = await run(
+        lambda: sb.table("circle_members")
+        .select("user_id")
+        .eq("circle_id", circle_id)
+        .eq("user_id", user["user_id"])
+        .execute()
+    )
+
+    if not member_r.data:
+        raise HTTPException(status_code=403, detail="You are not a member of this Circle")
+
+    messages_r = await run(
+        lambda: sb.table("circle_messages")
+        .select("*")
+        .eq("circle_id", circle_id)
+        .order("created_at", desc=True)
+        .limit(limit)
+        .execute()
+    )
+
+    messages = list(reversed(messages_r.data or []))
+    sender_ids = list({m["sender_id"] for m in messages})
+
+    users_map = {}
+    if sender_ids:
+        users_r = await run(
+            lambda: sb.table("users")
+            .select("*")
+            .in_("user_id", sender_ids)
+            .execute()
+        )
+        users_map = {
+            u["user_id"]: public_user(u)
+            for u in (users_r.data or [])
+        }
+
+    for message in messages:
+        message["sender"] = users_map.get(message["sender_id"])
+
+    return {"messages": messages}
+
+
+@api.post("/circles/message")
+async def send_circle_message(
+    body: CircleMessageIn,
+    user=Depends(current_user),
+):
+    member_r = await run(
+        lambda: sb.table("circle_members")
+        .select("user_id")
+        .eq("circle_id", body.circle_id)
+        .eq("user_id", user["user_id"])
+        .execute()
+    )
+
+    if not member_r.data:
+        raise HTTPException(status_code=403, detail="You are not a member of this Circle")
+
+    if not body.content.strip() and not body.media:
+        raise HTTPException(status_code=400, detail="Message cannot be empty")
+
+    message = {
+        "message_id": make_id("cmsg"),
+        "circle_id": body.circle_id,
+        "sender_id": user["user_id"],
+        "content": body.content,
+        "kind": body.kind,
+        "media": body.media,
+        "reply_to": body.reply_to,
+        "read_by": [user["user_id"]],
+        "reactions": [],
+        "created_at": ts(now_utc()),
+    }
+
+    await run(
+        lambda: sb.table("circle_messages")
+        .insert(message)
+        .execute()
+    )
+
+    await run(
+        lambda: sb.table("circles")
+        .update({"updated_at": ts(now_utc())})
+        .eq("circle_id", body.circle_id)
+        .execute()
+    )
+
+    members_r = await run(
+        lambda: sb.table("circle_members")
+        .select("user_id")
+        .eq("circle_id", body.circle_id)
+        .execute()
+    )
+
+    message["sender"] = public_user(user)
+
+    circle_r = await run(
+        lambda: sb.table("circles")
+        .select("name,photo")
+        .eq("circle_id", body.circle_id)
+        .limit(1)
+        .execute()
+    )
+    circle_data = circle_r.data[0] if circle_r.data else {}
+
+    if body.kind == "text":
+        preview = (body.content or "").strip()[:100] or "Sent a message"
+    else:
+        preview_map = {
+            "image": "Sent a photo",
+            "video": "Sent a video",
+            "voice": "Sent a voice message",
+            "file": "Sent a file",
+            "emoji": "Sent an emoji",
+        }
+        preview = preview_map.get(body.kind, "Sent a message")
+
+    for member in (members_r.data or []):
+        member_id = member["user_id"]
+
+        await broadcast_to_user(
+            member_id,
+            {
+                "type": "circle_message",
+                "circle_id": body.circle_id,
+                "message": message,
+            },
+        )
+
+        if member_id != user["user_id"]:
+            await _send_expo_push(
+                member_id,
+                "circle_message",
+                {
+                    "from": user["user_id"],
+                    "from_name": user.get("display_name", ""),
+                    "circle_id": body.circle_id,
+                    "circle_name": circle_data.get("name", "Circle"),
+                    "circle_photo": circle_data.get("photo"),
+                    "preview": preview,
+                    "message_id": message["message_id"],
+                },
+            )
+
+    return {"message": message}
+
+
+
+@api.put("/circles/message/{message_id}")
+async def edit_circle_message(
+    message_id: str,
+    body: MessageEdit,
+    user=Depends(current_user),
+):
+    mr = await run(
+        lambda: sb.table("circle_messages")
+        .select("*")
+        .eq("message_id", message_id)
+        .execute()
+    )
+
+    if not mr.data or mr.data[0]["sender_id"] != user["user_id"]:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    msg = mr.data[0]
+
+    await run(
+        lambda: sb.table("circle_messages")
+        .update({"content": body.content, "edited": True})
+        .eq("message_id", message_id)
+        .execute()
+    )
+
+    updated_r = await run(
+        lambda: sb.table("circle_messages")
+        .select("*")
+        .eq("message_id", message_id)
+        .execute()
+    )
+    updated = updated_r.data[0]
+    updated["sender"] = public_user(user)
+
+    members_r = await run(
+        lambda: sb.table("circle_members")
+        .select("user_id")
+        .eq("circle_id", msg["circle_id"])
+        .execute()
+    )
+
+    for member in (members_r.data or []):
+        await broadcast_to_user(
+            member["user_id"],
+            {
+                "type": "circle_message_edit",
+                "circle_id": msg["circle_id"],
+                "message": updated,
+            },
+        )
+
+    return updated
+
+
+@api.delete("/circles/message/{message_id}")
+async def delete_circle_message(
+    message_id: str,
+    user=Depends(current_user),
+):
+    mr = await run(
+        lambda: sb.table("circle_messages")
+        .select("*")
+        .eq("message_id", message_id)
+        .execute()
+    )
+
+    if not mr.data:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    msg = mr.data[0]
+
+    if msg["sender_id"] != user["user_id"]:
+        raise HTTPException(status_code=403, detail="Only the sender can delete this message")
+
+    await run(
+        lambda: sb.table("circle_messages")
+        .delete()
+        .eq("message_id", message_id)
+        .execute()
+    )
+
+    members_r = await run(
+        lambda: sb.table("circle_members")
+        .select("user_id")
+        .eq("circle_id", msg["circle_id"])
+        .execute()
+    )
+
+    for member in (members_r.data or []):
+        await broadcast_to_user(
+            member["user_id"],
+            {
+                "type": "circle_message_delete",
+                "circle_id": msg["circle_id"],
+                "message_id": message_id,
+            },
+        )
+
+    return {"ok": True}
+
+
+@api.post("/circles/message/{message_id}/react")
+async def react_circle_message(
+    message_id: str,
+    body: ReactionIn,
+    user=Depends(current_user),
+):
+    mr = await run(
+        lambda: sb.table("circle_messages")
+        .select("*")
+        .eq("message_id", message_id)
+        .execute()
+    )
+
+    if not mr.data:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    msg = mr.data[0]
+
+    member_r = await run(
+        lambda: sb.table("circle_members")
+        .select("user_id")
+        .eq("circle_id", msg["circle_id"])
+        .eq("user_id", user["user_id"])
+        .execute()
+    )
+
+    if not member_r.data:
+        raise HTTPException(status_code=403, detail="Not allowed")
+
+    reactions = list(msg.get("reactions") or [])
+    existing = next(
+        (r for r in reactions if r.get("user_id") == user["user_id"]),
+        None,
+    )
+
+    reaction_added = not (
+        existing and existing.get("emoji") == body.emoji
+    )
+
+    if not reaction_added:
+        reactions = [
+            r for r in reactions
+            if r.get("user_id") != user["user_id"]
+        ]
+    else:
+        reactions = [
+            r for r in reactions
+            if r.get("user_id") != user["user_id"]
+        ]
+        reactions.append({
+            "user_id": user["user_id"],
+            "emoji": body.emoji,
+            "at": ts(now_utc()),
+        })
+
+    await run(
+        lambda: sb.table("circle_messages")
+        .update({"reactions": reactions})
+        .eq("message_id", message_id)
+        .execute()
+    )
+
+    updated_r = await run(
+        lambda: sb.table("circle_messages")
+        .select("*")
+        .eq("message_id", message_id)
+        .execute()
+    )
+    updated = updated_r.data[0]
+
+    members_r = await run(
+        lambda: sb.table("circle_members")
+        .select("user_id")
+        .eq("circle_id", msg["circle_id"])
+        .execute()
+    )
+
+    for member in (members_r.data or []):
+        await broadcast_to_user(
+            member["user_id"],
+            {
+                "type": "circle_message_react",
+                "circle_id": msg["circle_id"],
+                "message": updated,
+            },
+        )
+
+    if reaction_added and msg["sender_id"] != user["user_id"]:
+        await _push_notification(
+            msg["sender_id"],
+            "circle_message_reaction",
+            {
+                "from": user["user_id"],
+                "from_name": user.get("display_name", ""),
+                "circle_id": msg["circle_id"],
+                "message_id": message_id,
+                "emoji": body.emoji,
+            },
+        )
+
+    return updated
+
+
 # ── Chats ──────────────────────────────────────────────────────────────────────
 def _conv_id_for(a: str, b: str) -> str:
     x, y = sorted([a, b])
@@ -1200,6 +2675,8 @@ async def open_chat(body: FriendActionIn, user=Depends(current_user)):
 
 @api.get("/chats")
 async def list_chats(user=Depends(current_user)):
+    blocked_ids = await blocked_user_ids(user["user_id"])
+
     r = await run(lambda: sb.table("conversations").select("*")
         .contains("participants", [user["user_id"]])
         .order("last_message_at", desc=True).limit(200).execute())
@@ -1210,7 +2687,7 @@ async def list_chats(user=Depends(current_user)):
             continue
         other = other_ids[0]
 
-        if await users_blocked(user["user_id"], other):
+        if other in blocked_ids:
             continue
 
         ur = await run(lambda: sb.table("users").select("*").eq("user_id", other).execute())
@@ -1281,6 +2758,7 @@ async def list_messages(
                 "conversation_id": conversation_id,
                 "message_id": mid,
                 "read_by": new_rb,
+                "read_by_user_id": user["user_id"],
             })
 
     return {"messages": visible}
@@ -1412,7 +2890,11 @@ async def react_message(message_id: str, body: ReactionIn, user=Depends(current_
 
     reactions: list = list(msg.get("reactions") or [])
     existing = next((r for r in reactions if r.get("user_id") == user["user_id"]), None)
-    if existing and existing.get("emoji") == body.emoji:
+    reaction_added = not (
+        existing and existing.get("emoji") == body.emoji
+    )
+
+    if not reaction_added:
         reactions = [r for r in reactions if r.get("user_id") != user["user_id"]]
     else:
         reactions = [r for r in reactions if r.get("user_id") != user["user_id"]]
@@ -1423,6 +2905,20 @@ async def react_message(message_id: str, body: ReactionIn, user=Depends(current_
     updated = updated_r.data[0]
     for p in cr.data[0]["participants"]:
         await broadcast_to_user(p, {"type": "message_react", "message": updated})
+
+    if reaction_added and msg["sender_id"] != user["user_id"]:
+        await _push_notification(
+            msg["sender_id"],
+            "message_reaction",
+            {
+                "from": user["user_id"],
+                "from_name": user.get("display_name", ""),
+                "conversation_id": msg["conversation_id"],
+                "message_id": message_id,
+                "emoji": body.emoji,
+            },
+        )
+
     return updated
 
 
@@ -1501,6 +2997,7 @@ async def create_story(body: StoryIn, user=Depends(current_user)):
 @api.get("/stories/feed")
 async def stories_feed(user=Depends(current_user)):
     me = user["user_id"]
+    blocked_ids = await blocked_user_ids(me)
 
     # Accepted bonds
     fr = await run(lambda: sb.table("friendships").select("a,b")
@@ -1523,7 +3020,7 @@ async def stories_feed(user=Depends(current_user)):
     for story in (sr.data or []):
         owner_id = story["user_id"]
 
-        if owner_id != me and await users_blocked(me, owner_id):
+        if owner_id != me and owner_id in blocked_ids:
             continue
 
         allowed = (
@@ -1637,12 +3134,14 @@ async def react_to_story(story_id: str, body: StoryReactBody, user=Depends(curre
 
     viewers = list(story.get("viewers") or [])
     found = False
+    reaction_added = False
 
     for viewer in viewers:
         if viewer.get("user_id") == user["user_id"]:
             reactions = list(viewer.get("reactions") or [])
             if len(reactions) < 5:
                 reactions.append(body.emoji)
+                reaction_added = True
             viewer["reactions"] = reactions
             viewer["reaction"] = reactions[0] if reactions else None
             viewer["reacted_at"] = ts(now_utc())
@@ -1650,6 +3149,7 @@ async def react_to_story(story_id: str, body: StoryReactBody, user=Depends(curre
             break
 
     if not found:
+        reaction_added = True
         viewers.append({
             "user_id": user["user_id"],
             "viewed_at": ts(now_utc()),
@@ -1667,6 +3167,19 @@ async def react_to_story(story_id: str, body: StoryReactBody, user=Depends(curre
         "from_user_id": user["user_id"],
         "from_name": user.get("display_name", ""),
     })
+
+    if reaction_added and story["user_id"] != user["user_id"]:
+        await _push_notification(
+            story["user_id"],
+            "story_reaction",
+            {
+                "from": user["user_id"],
+                "from_name": user.get("display_name", ""),
+                "story_id": story_id,
+                "story_owner_id": story["user_id"],
+                "emoji": body.emoji,
+            },
+        )
 
     return {"ok": True, "reaction": body.emoji}
 
@@ -1721,6 +3234,34 @@ async def mark_read(notif_id: str, user=Depends(current_user)):
     return {"ok": True}
 
 
+# ── Pending voice call ─────────────────────────────────────────────────────────
+@api.get("/calls/pending")
+async def get_pending_voice_call(
+    conversation_id: str,
+    user=Depends(current_user),
+):
+    user_id = user["user_id"]
+    pending = pending_voice_calls.get(user_id)
+
+    if not pending:
+        return {"call": None}
+
+    if pending.get("expires_at") < now_utc():
+        pending_voice_calls.pop(user_id, None)
+        return {"call": None}
+
+    if pending.get("conversation_id") != conversation_id:
+        return {"call": None}
+
+    return {
+        "call": {
+            "conversation_id": pending["conversation_id"],
+            "caller_id": pending["caller_id"],
+            "sdp": pending["sdp"],
+        }
+    }
+
+
 # ── WebSocket ──────────────────────────────────────────────────────────────────
 @app.websocket("/api/ws")
 async def websocket_endpoint(ws: WebSocket, token: str):
@@ -1733,24 +3274,172 @@ async def websocket_endpoint(ws: WebSocket, token: str):
         return
     await ws.accept()
     await hub.connect(user_id, ws)
+
+    # Load this user's conversation participants once when WebSocket connects.
+    # Typing events can then be forwarded instantly without a database request
+    # on every keypress.
+    typing_conversations = {}
+
+    try:
+        cr = await run(
+            lambda: sb.table("conversations")
+            .select("conversation_id,participants")
+            .contains("participants", [user_id])
+            .execute()
+        )
+        typing_conversations = {
+            row["conversation_id"]: row.get("participants", [])
+            for row in (cr.data or [])
+        }
+    except Exception:
+        typing_conversations = {}
+
     try:
         while True:
             data = await ws.receive_json()
             t = data.get("type")
+
             if t == "typing":
                 conv_id = data.get("conversation_id")
-                if conv_id:
-                    cr = await run(lambda: sb.table("conversations").select("participants")
-                        .eq("conversation_id", conv_id).execute())
-                    if cr.data and user_id in cr.data[0]["participants"]:
-                        for p in cr.data[0]["participants"]:
-                            if p != user_id:
-                                await hub.send(p, {
-                                    "type": "typing",
+                participants = typing_conversations.get(conv_id, [])
+
+                if conv_id and not participants:
+                    cr = await run(
+                        lambda: sb.table("conversations")
+                        .select("participants")
+                        .eq("conversation_id", conv_id)
+                        .limit(1)
+                        .execute()
+                    )
+
+                    if cr.data:
+                        participants = cr.data[0].get("participants", [])
+                        typing_conversations[conv_id] = participants
+
+                if user_id in participants:
+                    payload = {
+                        "type": "typing",
+                        "conversation_id": conv_id,
+                        "user_id": user_id,
+                        "is_typing": bool(data.get("is_typing")),
+                    }
+
+                    for participant_id in participants:
+                        if participant_id != user_id:
+                            await hub.send(participant_id, payload)
+
+            elif t == "message_read":
+                conv_id = data.get("conversation_id")
+                message_id = data.get("message_id")
+                participants = typing_conversations.get(conv_id, [])
+
+                if (
+                    conv_id
+                    and message_id
+                    and user_id in participants
+                ):
+                    mr = await run(
+                        lambda: sb.table("messages")
+                        .select("sender_id,read_by")
+                        .eq("message_id", message_id)
+                        .eq("conversation_id", conv_id)
+                        .limit(1)
+                        .execute()
+                    )
+
+                    if mr.data:
+                        msg = mr.data[0]
+                        sender_id = msg.get("sender_id")
+                        read_by = msg.get("read_by") or []
+
+                        if sender_id != user_id and user_id not in read_by:
+                            new_rb = list(set(read_by + [user_id]))
+
+                            await run(
+                                lambda: sb.table("messages")
+                                .update({"read_by": new_rb})
+                                .eq("message_id", message_id)
+                                .execute()
+                            )
+
+                            await hub.send(sender_id, {
+                                "type": "message_read",
+                                "conversation_id": conv_id,
+                                "message_id": message_id,
+                                "read_by": new_rb,
+                                "read_by_user_id": user_id,
+                            })
+
+            elif t in {"call_offer", "call_answer", "call_ice", "call_end"}:
+                conv_id = data.get("conversation_id")
+                participants = typing_conversations.get(conv_id, [])
+
+                if conv_id and not participants:
+                    cr = await run(
+                        lambda: sb.table("conversations")
+                        .select("participants")
+                        .eq("conversation_id", conv_id)
+                        .limit(1)
+                        .execute()
+                    )
+
+                    if cr.data:
+                        participants = cr.data[0].get("participants", [])
+                        typing_conversations[conv_id] = participants
+
+                if user_id in participants:
+                    if t == "call_offer":
+                        for participant_id in participants:
+                            if participant_id != user_id:
+                                pending_voice_calls[participant_id] = {
                                     "conversation_id": conv_id,
-                                    "user_id": user_id,
-                                    "is_typing": bool(data.get("is_typing")),
-                                })
+                                    "caller_id": user_id,
+                                    "sdp": data.get("sdp"),
+                                    "expires_at": now_utc() + timedelta(seconds=60),
+                                }
+
+                    elif t == "call_end":
+                        for participant_id in participants:
+                            pending_voice_calls.pop(participant_id, None)
+                        pending_voice_calls.pop(user_id, None)
+
+                    payload = {
+                        "type": t,
+                        "conversation_id": conv_id,
+                        "user_id": user_id,
+                    }
+
+                    if t in {"call_offer", "call_answer"}:
+                        payload["sdp"] = data.get("sdp")
+                    elif t == "call_ice":
+                        payload["candidate"] = data.get("candidate")
+
+                    for participant_id in participants:
+                        if participant_id != user_id:
+                            await hub.send(participant_id, payload)
+
+                            if t == "call_offer":
+                                try:
+                                    caller = await get_user_public(user_id)
+                                    await _send_expo_push(
+                                        participant_id,
+                                        "voice_call",
+                                        {
+                                            "from_user_id": user_id,
+                                            "from_name": (
+                                                caller.get("display_name")
+                                                if caller
+                                                else "Nexus User"
+                                            ),
+                                            "conversation_id": conv_id,
+                                        },
+                                    )
+                                except Exception as e:
+                                    logger.warning(
+                                        "Voice call push failed: %s",
+                                        e,
+                                    )
+
             elif t == "ping":
                 await ws.send_json({"type": "pong"})
     except WebSocketDisconnect:
@@ -1948,6 +3637,16 @@ async def admin_moderate_user(
         .execute()
     )
 
+    await _send_expo_push(
+        user_id,
+        "account_moderated",
+        {
+            "status": status,
+            "reason": reason,
+            "reason_code": update["moderation_reason_code"],
+        },
+    )
+
     return {
         "ok": True,
         "user_id": user_id,
@@ -2030,6 +3729,14 @@ async def admin_restore_user(
         .eq("user_id", user_id)
         .eq("status", "pending")
         .execute()
+    )
+
+    await _send_expo_push(
+        user_id,
+        "account_restored",
+        {
+            "status": "active",
+        },
     )
 
     return {

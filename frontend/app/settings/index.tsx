@@ -54,6 +54,7 @@ export default function Settings() {
             />
           </View>
           <Row icon="shield" label="Blocked users" onPress={() => router.push("/settings/blocked")} testID="settings-blocked" />
+          <Row icon="file-text" label="Privacy & Policy" onPress={() => router.push("/settings/privacy-policy")} testID="settings-privacy-policy" />
         </Section>
 
         <Section label="Account">

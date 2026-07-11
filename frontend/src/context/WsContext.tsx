@@ -9,12 +9,27 @@ const isWeb = Platform.OS === "web";
 const BASE  = isWeb ? "" : (process.env.EXPO_PUBLIC_BACKEND_URL ?? "");
 
 export type WsEvent =
+  | { type: "circle_message"; circle_id: string; message: any }
+  | { type: "circle_message_edit"; circle_id: string; message: any }
+  | { type: "circle_message_react"; circle_id: string; message: any }
+  | { type: "circle_message_delete"; circle_id: string; message_id: string }
+  | { type: "circle_theme_update"; circle_id: string; theme: string; changed_by?: string }
   | { type: "message"; message: any }
   | { type: "message_edit"; message: any }
   | { type: "message_react"; message: any }
-  | { type: "message_read"; conversation_id: string; message_id: string; read_by: string[] }
+  | {
+      type: "message_read";
+      conversation_id: string;
+      message_id: string;
+      read_by: string[];
+      read_by_user_id?: string;
+    }
   | { type: "message_delete"; message_id: string }
   | { type: "typing"; conversation_id: string; user_id: string; is_typing: boolean }
+  | { type: "call_offer"; conversation_id: string; user_id: string; sdp: any }
+  | { type: "call_answer"; conversation_id: string; user_id: string; sdp: any }
+  | { type: "call_ice"; conversation_id: string; user_id: string; candidate: any }
+  | { type: "call_end"; conversation_id: string; user_id: string }
   | {
       type: "presence";
       user_id: string;

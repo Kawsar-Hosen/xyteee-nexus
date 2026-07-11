@@ -37,7 +37,7 @@ function fmt(sec: number) {
   return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
 }
 
-const BAR_COUNT = 28;
+const BAR_COUNT = 40;
 
 export function VoiceBubble({
   mediaUri,
@@ -58,6 +58,11 @@ export function VoiceBubble({
   const durSec = parseDuration(duration || "0:00");
   const player = useAudioPlayer(mediaUri);
   const status = useAudioPlayerStatus(player);
+  const totalDuration = status.duration || durSec || 1;
+  const progress = Math.min(
+    1,
+    Math.max(0, (status.currentTime || 0) / totalDuration)
+  );
 
   const handlePlay = () => {
     if (status.playing) {
@@ -76,26 +81,82 @@ export function VoiceBubble({
       <View style={{ flex: 1 }}>
         <View style={styles.bars}>
           {bars.map((h, i) => (
-            <StaticBar key={i} height={h} tint={tint} />
+            <StaticBar
+              key={i}
+              height={h}
+              tint={tint}
+              active={i / bars.length <= progress}
+            />
           ))}
         </View>
-        <NxText style={[styles.dur, { color: tint }]}>{fmt(durSec)}</NxText>
+        <NxText style={[styles.dur, { color: tint }]}>
+          {fmt(
+            status.playing
+              ? Math.max(0, Math.ceil(totalDuration - (status.currentTime || 0)))
+              : durSec
+          )}
+        </NxText>
       </View>
     </View>
   );
 }
 
-function StaticBar({ height, tint }: { height: number; tint: string }) {
+function StaticBar({
+  height,
+  tint,
+  active,
+}: {
+  height: number;
+  tint: string;
+  active: boolean;
+}) {
   const h = useSharedValue(height);
   useEffect(() => { h.value = withTiming(height, { duration: 300 }); }, [height, h]);
-  const style = useAnimatedStyle(() => ({ height: h.value * 28, opacity: 0.45 }));
-  return <Animated.View style={[styles.bar, { backgroundColor: tint }, style]} />;
+  const style = useAnimatedStyle(() => ({
+    height: h.value * 28,
+    opacity: withTiming(active ? 1 : 0.35, { duration: 120 }),
+  }));
+
+  return (
+    <Animated.View
+      style={[styles.bar, { backgroundColor: tint }, style]}
+    />
+  );
 }
 
 const styles = StyleSheet.create({
-  wrap: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 10, borderRadius: 20, borderWidth: 1, gap: 10, minWidth: 200, maxWidth: 280 },
-  playBtn: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
-  bars: { flexDirection: "row", alignItems: "center", gap: 2, height: 28 },
-  bar: { width: 3, borderRadius: 2 },
-  dur: { fontSize: 11, fontFamily: fonts.bodySemi, marginTop: 3 },
+  wrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 18,
+    borderWidth: 1,
+    gap: 8,
+    width: 220,
+  },
+  playBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  bars: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 1.5,
+    height: 24,
+  },
+  bar: {
+    flex: 1,
+    minWidth: 2,
+    maxWidth: 3,
+    borderRadius: 2,
+  },
+  dur: {
+    fontSize: 10,
+    fontFamily: fonts.bodySemi,
+    marginTop: 1,
+  },
 });

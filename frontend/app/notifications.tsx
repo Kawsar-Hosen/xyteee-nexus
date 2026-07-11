@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   RefreshControl,
   Image,
+  Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
@@ -30,6 +31,7 @@ export default function Notifications() {
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [circleActionId, setCircleActionId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!token) return;
@@ -62,9 +64,18 @@ export default function Notifications() {
 
   useEffect(() => {
     return subscribe((e) => {
-      if (e.type === "notification") load();
+      if (e.type === "notification") {
+        load();
+
+        if (token) {
+          api("/notifications/read", {
+            method: "POST",
+            token,
+          }).catch(() => {});
+        }
+      }
     });
-  }, [subscribe, load]);
+  }, [subscribe, load, token]);
 
   const icon = (kind: string) =>
     ({
@@ -72,6 +83,10 @@ export default function Notifications() {
       friend_accepted: "user-check",
       message: "message-circle",
       story: "aperture",
+      circle_invite: "users",
+      circle_invite_accepted: "user-check",
+      circle_invite_rejected: "user-x",
+      circle_member_removed: "user-minus",
     }[kind] || "bell");
 
   const accent = (kind: string) => {
@@ -84,29 +99,16 @@ export default function Notifications() {
         return "#2E9B67";
       case "story":
         return "#8B5CF6";
+      case "circle_invite":
+        return "#7C3AED";
+      case "circle_invite_accepted":
+        return "#2E9B67";
+      case "circle_invite_rejected":
+        return "#D97706";
+      case "circle_member_removed":
+        return "#DC4C4C";
       default:
         return colors.primary;
-    }
-  };
-
-  const label = (n: any) => {
-    const name =
-      n.sender?.display_name ||
-      n.data?.from_name ||
-      n.sender?.username ||
-      "Someone";
-
-    switch (n.kind) {
-      case "friend_request":
-        return `${name} sent you a bond request`;
-      case "friend_accepted":
-        return `${name} accepted your bond`;
-      case "message":
-        return `${name}: ${n.data?.preview || "New message"}`;
-      case "story":
-        return `${name} shared a reverie`;
-      default:
-        return "New activity";
     }
   };
 
@@ -120,6 +122,51 @@ export default function Notifications() {
       router.push("/(app)/friends");
     } else if (n.kind === "story" && n.data?.from) {
       router.push(`/story/${n.data.from}`);
+    } else if (
+      (
+        n.kind === "circle_invite_accepted" ||
+        n.kind === "circle_invite_rejected"
+      ) &&
+      n.data?.circle_id
+    ) {
+      router.push(`/circles/${n.data.circle_id}`);
+    }
+  };
+
+  const handleCircleInvite = async (
+    item: any,
+    action: "accept" | "reject"
+  ) => {
+    if (!token || circleActionId) return;
+
+    setCircleActionId(item.notif_id);
+
+    try {
+      const result = await api<{ circle_id?: string }>(
+        `/circles/invites/${item.notif_id}/${action}`,
+        {
+          method: "POST",
+          token,
+        }
+      );
+
+      setItems((current) =>
+        current.filter((notification) => notification.notif_id !== item.notif_id)
+      );
+
+      if (action === "accept" && result.circle_id) {
+        router.push({
+          pathname: "/circles/[id]",
+          params: { id: result.circle_id },
+        });
+      }
+    } catch (error: any) {
+      Alert.alert(
+        action === "accept" ? "Could not join Circle" : "Could not reject invite",
+        error?.message || error?.detail || "Please try again"
+      );
+    } finally {
+      setCircleActionId(null);
     }
   };
 
@@ -184,43 +231,207 @@ export default function Notifications() {
         </View>
 
         <View style={styles.content}>
-          <View style={styles.notificationLine}>
-            <NxText
-              style={{
-                color: colors.foreground,
-                fontFamily: item.read ? fonts.bodyMedium : fonts.bodySemi,
-                fontSize: 15,
-                lineHeight: 21,
-              }}
-            >
-              {item.data?.from_name || "Someone"}
-            </NxText>
+          {item.kind === "circle_invite" ? (
+            <>
+              <View style={styles.notificationLine}>
+                <NxText
+                  style={{
+                    color: colors.foreground,
+                    fontFamily: fonts.bodySemi,
+                    fontSize: 15,
+                    lineHeight: 21,
+                  }}
+                >
+                  {item.sender?.display_name ||
+                    item.data?.from_name ||
+                    "Someone"}
+                </NxText>
 
-            <VerifiedBadge
-              badgeType={item.sender?.badge_type}
-              size={15}
-            />
+                <VerifiedBadge
+                  badgeType={item.sender?.badge_type}
+                  size={15}
+                />
 
-            <NxText
-              style={{
-                color: colors.foreground,
-                fontFamily: item.read ? fonts.bodyMedium : fonts.bodySemi,
-                fontSize: 15,
-                lineHeight: 21,
-                flexShrink: 1,
-              }}
-            >
-              {item.kind === "friend_request"
-                ? " sent you a bond request"
-                : item.kind === "friend_accepted"
-                ? " accepted your bond"
-                : item.kind === "message"
-                ? `: ${item.data?.preview || ""}`
-                : item.kind === "story"
-                ? " shared a reverie"
-                : " Activity"}
-            </NxText>
-          </View>
+                <NxText
+                  style={{
+                    color: colors.foreground,
+                    fontFamily: fonts.bodyMedium,
+                    fontSize: 15,
+                    lineHeight: 21,
+                    flexShrink: 1,
+                  }}
+                >
+                  {" invited you to a Circle"}
+                </NxText>
+              </View>
+
+              <View
+                style={[
+                  styles.circleInviteCard,
+                  {
+                    backgroundColor: colors.surface,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <View
+                  style={[
+                    styles.circleInviteIcon,
+                    { backgroundColor: colors.surfaceHigh },
+                  ]}
+                >
+                  <Feather
+                    name="users"
+                    size={19}
+                    color={colors.primary}
+                  />
+                </View>
+
+                <View style={{ flex: 1 }}>
+                  <NxText
+                    numberOfLines={1}
+                    style={{
+                      color: colors.foreground,
+                      fontFamily: fonts.bodySemi,
+                      fontSize: 14,
+                    }}
+                  >
+                    {item.data?.circle_name || "Circle"}
+                  </NxText>
+
+                  <NxText
+                    style={{
+                      color: colors.mutedFg,
+                      fontSize: 11,
+                      marginTop: 2,
+                    }}
+                  >
+                    Circle invitation
+                  </NxText>
+                </View>
+              </View>
+
+              <View style={styles.circleActions}>
+                <TouchableOpacity
+                  disabled={circleActionId === item.notif_id}
+                  onPress={() => handleCircleInvite(item, "accept")}
+                  style={[
+                    styles.circleAcceptBtn,
+                    { backgroundColor: colors.primary },
+                  ]}
+                >
+                  {circleActionId === item.notif_id ? (
+                    <ActivityIndicator
+                      size="small"
+                      color={colors.onPrimary}
+                    />
+                  ) : (
+                    <>
+                      <Feather
+                        name="check"
+                        size={15}
+                        color={colors.onPrimary}
+                      />
+                      <NxText
+                        style={{
+                          marginLeft: 6,
+                          color: colors.onPrimary,
+                          fontFamily: fonts.bodySemi,
+                          fontSize: 12,
+                        }}
+                      >
+                        Accept
+                      </NxText>
+                    </>
+                  )}
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  disabled={circleActionId === item.notif_id}
+                  onPress={() => handleCircleInvite(item, "reject")}
+                  style={[
+                    styles.circleRejectBtn,
+                    {
+                      backgroundColor: colors.surface,
+                      borderColor: colors.border,
+                    },
+                  ]}
+                >
+                  <Feather
+                    name="x"
+                    size={15}
+                    color={colors.mutedFg}
+                  />
+                  <NxText
+                    style={{
+                      marginLeft: 6,
+                      color: colors.mutedFg,
+                      fontFamily: fonts.bodySemi,
+                      fontSize: 12,
+                    }}
+                  >
+                    Reject
+                  </NxText>
+                </TouchableOpacity>
+              </View>
+            </>
+          ) : item.kind === "circle_member_removed" ? (
+            <View style={styles.notificationLine}>
+              <NxText
+                style={{
+                  color: colors.foreground,
+                  fontFamily: item.read ? fonts.bodyMedium : fonts.bodySemi,
+                  fontSize: 15,
+                  lineHeight: 21,
+                  flexShrink: 1,
+                }}
+              >
+                {`You were removed from ${item.data?.circle_name || "a Circle"}`}
+              </NxText>
+            </View>
+          ) : (
+            <View style={styles.notificationLine}>
+              <NxText
+                style={{
+                  color: colors.foreground,
+                  fontFamily: item.read ? fonts.bodyMedium : fonts.bodySemi,
+                  fontSize: 15,
+                  lineHeight: 21,
+                }}
+              >
+                {item.data?.from_name || "Someone"}
+              </NxText>
+
+              <VerifiedBadge
+                badgeType={item.sender?.badge_type}
+                size={15}
+              />
+
+              <NxText
+                style={{
+                  color: colors.foreground,
+                  fontFamily: item.read ? fonts.bodyMedium : fonts.bodySemi,
+                  fontSize: 15,
+                  lineHeight: 21,
+                  flexShrink: 1,
+                }}
+              >
+                {item.kind === "friend_request"
+                  ? " sent you a bond request"
+                  : item.kind === "friend_accepted"
+                  ? " accepted your bond"
+                  : item.kind === "message"
+                  ? `: ${item.data?.preview || ""}`
+                  : item.kind === "story"
+                  ? " shared a reverie"
+                  : item.kind === "circle_invite_accepted"
+                  ? ` accepted your invitation to ${item.data?.circle_name || "the Circle"}`
+                  : item.kind === "circle_invite_rejected"
+                  ? ` declined your invitation to ${item.data?.circle_name || "the Circle"}`
+                  : " Activity"}
+              </NxText>
+            </View>
+          )}
 
           <NxText
             variant="caption"
@@ -277,9 +488,7 @@ export default function Notifications() {
       </View>
 
       {loading ? (
-        <View style={styles.loading}>
-          <ActivityIndicator color={colors.primary} />
-        </View>
+        <NotificationsSkeleton />
       ) : (
         <FlatList
           data={items}
@@ -341,6 +550,98 @@ export default function Notifications() {
   );
 }
 
+function NotificationsSkeleton() {
+  const { colors } = useTheme();
+  const skeletonColor = colors.surfaceHigh;
+
+  return (
+    <View style={{ flex: 1 }}>
+      {[0, 1, 2, 3, 4, 5, 6].map((item) => (
+        <View key={item}>
+          <View style={styles.row}>
+            <View style={styles.avatarArea}>
+              <View
+                style={[
+                  styles.skeletonCircle,
+                  {
+                    width: 54,
+                    height: 54,
+                    borderRadius: 27,
+                    backgroundColor: skeletonColor,
+                  },
+                ]}
+              />
+
+              <View
+                style={[
+                  styles.skeletonCircle,
+                  {
+                    position: "absolute",
+                    right: 0,
+                    bottom: 0,
+                    width: 25,
+                    height: 25,
+                    borderRadius: 13,
+                    backgroundColor: colors.surface,
+                    borderWidth: 2.5,
+                    borderColor: colors.background,
+                  },
+                ]}
+              />
+            </View>
+
+            <View style={{ flex: 1, marginLeft: 14, paddingRight: 10 }}>
+              <View
+                style={[
+                  styles.skeletonLine,
+                  {
+                    width: item % 2 === 0 ? "72%" : "58%",
+                    height: 13,
+                    backgroundColor: skeletonColor,
+                  },
+                ]}
+              />
+
+              <View
+                style={[
+                  styles.skeletonLine,
+                  {
+                    width: item % 2 === 0 ? "88%" : "76%",
+                    height: 11,
+                    marginTop: 9,
+                    backgroundColor: skeletonColor,
+                  },
+                ]}
+              />
+
+              <View
+                style={[
+                  styles.skeletonLine,
+                  {
+                    width: 52,
+                    height: 9,
+                    marginTop: 9,
+                    backgroundColor: skeletonColor,
+                  },
+                ]}
+              />
+            </View>
+          </View>
+
+          {item < 6 ? (
+            <View
+              style={[
+                styles.separator,
+                { backgroundColor: colors.border },
+              ]}
+            />
+          ) : null}
+        </View>
+      ))}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   header: {
     height: 62,
@@ -355,6 +656,12 @@ const styles = StyleSheet.create({
     height: 42,
     alignItems: "center",
     justifyContent: "center",
+  },
+  skeletonLine: {
+    borderRadius: 999,
+  },
+  skeletonCircle: {
+    flexShrink: 0,
   },
   loading: {
     flex: 1,
@@ -412,6 +719,45 @@ const styles = StyleSheet.create({
   separator: {
     height: StyleSheet.hairlineWidth,
     marginLeft: 92,
+  },
+  circleInviteCard: {
+    marginTop: 10,
+    minHeight: 58,
+    borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+  },
+  circleInviteIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 10,
+  },
+  circleActions: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 10,
+  },
+  circleAcceptBtn: {
+    flex: 1,
+    height: 38,
+    borderRadius: 19,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  circleRejectBtn: {
+    flex: 1,
+    height: 38,
+    borderRadius: 19,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
   },
   empty: {
     flex: 1,

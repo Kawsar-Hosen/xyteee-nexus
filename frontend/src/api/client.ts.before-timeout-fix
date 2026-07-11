@@ -1,0 +1,81 @@
+import { Platform } from "react-native";
+/**
+ * XYTEEE Nexus API client.
+ *
+ * On web: uses a relative base URL so the reverse proxy (proxy.js on port
+ * 5000) routes /api/* to the FastAPI backend — no cross-origin request needed.
+ *
+ * On native (iOS/Android): falls back to EXPO_PUBLIC_BACKEND_URL which must
+ * point directly at the backend host.
+ */
+
+const isWeb = Platform.OS === "web";
+const BASE  = isWeb ? "" : (process.env.EXPO_PUBLIC_BACKEND_URL ?? "");
+
+export const API_BASE = `${BASE}/api`;
+
+export type FetchOptions = {
+  method?: "GET" | "POST" | "PUT" | "DELETE";
+  body?: unknown;
+  token?: string | null;
+  query?: Record<string, string | number | boolean | undefined | null>;
+};
+
+function buildQuery(query?: FetchOptions["query"]) {
+  if (!query) return "";
+  const parts = Object.entries(query)
+    .filter(([, v]) => v !== undefined && v !== null && v !== "")
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`);
+  return parts.length ? `?${parts.join("&")}` : "";
+}
+
+export async function api<T = any>(path: string, opts: FetchOptions = {}): Promise<T> {
+  const url = `${API_BASE}${path}${buildQuery(opts.query)}`;
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (opts.token) headers.Authorization = `Bearer ${opts.token}`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000);
+
+  let res: Response;
+
+  try {
+    res = await fetch(url, {
+      method: opts.method || "GET",
+      headers,
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+      signal: controller.signal,
+    });
+  } catch (error: any) {
+    const err: any = new Error(
+      error?.name === "AbortError"
+        ? "Connection timed out. Check your network."
+        : "Unable to connect. Check your network."
+    );
+    err.code = "NETWORK_ERROR";
+    throw err;
+  } finally {
+    clearTimeout(timeout);
+  }
+  const text = await res.text();
+  const data = text ? JSON.parse(text) : {};
+  if (!res.ok) {
+    const raw = data.detail;
+    let msg: string;
+    if (Array.isArray(raw)) {
+      msg = raw
+        .map((e: any) => (typeof e === "string" ? e : e?.msg || JSON.stringify(e)))
+        .join(", ");
+    } else if (raw && typeof raw === "object") {
+      msg = raw.msg || JSON.stringify(raw);
+    } else if (typeof raw === "string") {
+      msg = raw;
+    } else {
+      msg = `HTTP ${res.status}`;
+    }
+    const err: any = new Error(msg);
+    err.status = res.status;
+    err.data = data;
+    throw err;
+  }
+  return data as T;
+}

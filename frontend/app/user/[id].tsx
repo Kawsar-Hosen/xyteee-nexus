@@ -19,6 +19,7 @@ import { api } from "@/src/api/client";
 import { NxText } from "@/src/components/NxText";
 import { Avatar } from "@/src/components/Avatar";
 import { VerifiedBadge } from "@/src/components/VerifiedBadge";
+import { AnimatedStatusText } from "@/src/components/AnimatedStatusText";
 import { fonts, radii, spacing } from "@/src/theme";
 
 export default function UserProfile() {
@@ -30,6 +31,23 @@ export default function UserProfile() {
   const [notFound, setNotFound] = useState(false);
   const [busy, setBusy] = useState(false);
   const [hasStory, setHasStory] = useState(false);
+  const storyRingRotation = useSharedValue(0);
+
+  useEffect(() => {
+    if (hasStory) {
+      storyRingRotation.value = withRepeat(
+        withTiming(360, { duration: 3000 }),
+        -1,
+        false
+      );
+    } else {
+      storyRingRotation.value = 0;
+    }
+  }, [hasStory]);
+
+  const storyRingStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${storyRingRotation.value}deg` }],
+  }));
 
   const load = useCallback(async () => {
     if (!token || !id) return;
@@ -132,64 +150,116 @@ export default function UserProfile() {
         </View>
         <View style={{ paddingHorizontal: spacing.lg }}>
           <View style={styles.profileTopRow}>
-            <View style={{ marginTop: -50 }}>
-              <Avatar
-                uri={u.profile_picture}
-                name={u.display_name}
-                size={100}
-                online={u.online}
-                onlineStatus={u.online_status || "online"}
-              />
-            </View>
+            <TouchableOpacity
+              testID="user-profile-avatar"
+              activeOpacity={hasStory ? 0.85 : 1}
+              disabled={!hasStory}
+              onPress={() => router.push(`/story/${id}`)}
+              style={{
+                marginTop: -50,
+                width: hasStory ? 108 : 100,
+                height: hasStory ? 108 : 100,
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              {hasStory ? (
+                <>
+                  <Animated.View
+                    pointerEvents="none"
+                    style={[
+                      {
+                        position: "absolute",
+                        width: 108,
+                        height: 108,
+                        borderRadius: 54,
+                        overflow: "hidden",
+                      },
+                      storyRingStyle,
+                    ]}
+                  >
+                    <LinearGradient
+                      colors={["#ff004c", "#ffea00", "#00ff85", "#00c8ff", "#7a00ff", "#ff00c8", "#ff004c"]}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                      style={StyleSheet.absoluteFillObject}
+                    />
+                  </Animated.View>
+
+                  <View
+                    style={{
+                      padding: 2,
+                      borderRadius: 52,
+                      backgroundColor: colors.background,
+                    }}
+                  >
+                    <Avatar
+                      uri={u.profile_picture}
+                      name={u.display_name}
+                      size={100}
+                      online={u.online}
+                      onlineStatus={u.online_status || "online"}
+                    />
+                  </View>
+                </>
+              ) : (
+                <Avatar
+                  uri={u.profile_picture}
+                  name={u.display_name}
+                  size={100}
+                  online={u.online}
+                  onlineStatus={u.online_status || "online"}
+                />
+              )}
+            </TouchableOpacity>
 
             {!u.private_locked && u.status_text ? (
-              <View
-                style={[
-                  styles.statusBubble,
-                  {
-                    backgroundColor: colors.surface,
-                    borderColor: colors.border,
-                  },
-                ]}
-              >
+              <View style={styles.statusWrap}>
                 <View
                   style={[
-                    styles.statusDot,
-                    { backgroundColor: colors.primary },
+                    styles.thoughtDotSmall,
+                    { backgroundColor: colors.surface },
                   ]}
                 />
-                <NxText
-                  numberOfLines={2}
-                  style={{
-                    flexShrink: 1,
-                    color: colors.foreground,
-                    fontFamily: fonts.bodyMedium,
-                    fontSize: 13,
-                    lineHeight: 18,
-                  }}
+                <View
+                  style={[
+                    styles.thoughtDotLarge,
+                    { backgroundColor: colors.surface },
+                  ]}
+                />
+
+                <View
+                  style={[
+                    styles.statusBubble,
+                    {
+                      backgroundColor: colors.surface,
+                      borderColor: colors.border,
+                    },
+                  ]}
                 >
-                  {u.status_text}
-                </NxText>
+                  <View
+                    style={[
+                      styles.statusPlus,
+                      { backgroundColor: colors.mutedFg },
+                    ]}
+                  >
+                    <Feather
+                      name="plus"
+                      size={12}
+                      color={colors.background}
+                    />
+                  </View>
+
+                  <AnimatedStatusText
+                    color={colors.foreground}
+                    style={{ flexShrink: 1 }}
+                  >
+                    {u.status_text}
+                  </AnimatedStatusText>
+                </View>
               </View>
             ) : null}
           </View>
-          {hasStory ? (
-            <TouchableOpacity
-              testID="user-story"
-              onPress={() => router.push(`/story/${id}`)}
-              style={{ alignSelf: "flex-start", marginTop: 10 }}
-            >
-              <NxText
-                style={{
-                  color: colors.primary,
-                  fontFamily: fonts.bodySemi,
-                  fontSize: 14,
-                }}
-              >
-                Story
-              </NxText>
-            </TouchableOpacity>
-          ) : null}
 
           <View style={{ marginTop: spacing.md }}>
             <View style={{ flexDirection: "row", alignItems: "center" }}>
@@ -389,28 +459,54 @@ const styles = StyleSheet.create({
   cover: { height: 200 },
   iconBtn: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
   profileTopRow: {
+    height: 86,
     flexDirection: "row",
     alignItems: "flex-start",
+  },
+  statusWrap: {
+    flex: 1,
+    height: 78,
+    marginLeft: 10,
+    marginTop: -32,
+    position: "relative",
+    justifyContent: "flex-end",
   },
   statusBubble: {
     flexDirection: "row",
     alignItems: "center",
-    maxWidth: "68%",
-    minHeight: 52,
+    width: "100%",
+    minHeight: 58,
     borderWidth: 1,
-    borderRadius: 20,
-    paddingHorizontal: 16,
+    borderRadius: 18,
+    paddingHorizontal: 13,
     paddingVertical: 10,
-    marginLeft: 10,
-    marginTop: -18,
   },
-  statusDot: {
-    width: 9,
-    height: 9,
-    borderRadius: 5,
-    marginRight: 9,
-    alignSelf: "flex-start",
-    marginTop: 5,
+  thoughtDotSmall: {
+    position: "absolute",
+    left: -10,
+    top: 7,
+    width: 7,
+    height: 7,
+    borderRadius: 999,
+    zIndex: 3,
+  },
+  thoughtDotLarge: {
+    position: "absolute",
+    left: 3,
+    top: 16,
+    width: 11,
+    height: 11,
+    borderRadius: 999,
+    zIndex: 3,
+  },
+  statusPlus: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 8,
+    flexShrink: 0,
   },
   mutualRow: {
     flexDirection: "row",

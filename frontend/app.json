@@ -2,7 +2,7 @@
   "expo": {
     "name": "Nexus",
     "slug": "xyteee-nexus",
-    "version": "2.0.1",
+    "version": "1.29.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "xyteeenexus",
@@ -19,6 +19,9 @@
     },
     "android": {
       "package": "com.xyteee.nexus",
+      "googleServicesFile": "./google-services.json",
+      "versionCode": 12900,
+      "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#070709"
@@ -44,9 +47,27 @@
           "photosPermission": "Choose photos to share and post as stories"
         }
       ],
-      "expo-notifications",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/notification-icon.png",
+          "color": "#D4A84F",
+          "defaultChannel": "default"
+        }
+      ],
       "expo-audio",
-      "expo-video"
+      "expo-video",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/icon.png",
+          "imageWidth": 180,
+          "resizeMode": "contain",
+          "backgroundColor": "#000000"
+        }
+      ],
+      "expo-asset",
+      "@config-plugins/react-native-webrtc"
     ],
     "experiments": {
       "typedRoutes": true

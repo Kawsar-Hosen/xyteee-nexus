@@ -42,6 +42,7 @@ type AuthCtx = {
   accounts: StoredAccount[];
   login: (email: string, password: string, opts?: { addAccount?: boolean }) => Promise<void>;
   signup: (email: string, password: string, username: string, display_name: string) => Promise<{ verify_token?: string }>;
+  googleAuth: (idToken: string) => Promise<{ is_new_user: boolean }>;
   logout: () => Promise<void>;
   switchAccount: (user_id: string) => Promise<void>;
   removeAccount: (user_id: string) => Promise<void>;
@@ -154,6 +155,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return { verify_token: r.verify_token };
   };
 
+  const googleAuth = async (idToken: string) => {
+    const r = await api<{
+      token: string;
+      user: User;
+      is_new_user: boolean;
+    }>("/auth/google", {
+      method: "POST",
+      body: { id_token: idToken },
+    });
+
+    const list = await upsertAccount(r.user, r.token);
+    const active = list.find((a) => a.user_id === r.user.user_id)!;
+    applyActive(active, r.user);
+
+    return { is_new_user: r.is_new_user };
+  };
+
   const logout = async () => {
     try {
       if (token) await api("/auth/logout", { method: "POST", token });
@@ -241,7 +259,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <Ctx.Provider value={{ user, token, loading, accounts, login, signup, logout, switchAccount, removeAccount, deleteAccount, refresh, updateUser }}>
+    <Ctx.Provider value={{ user, token, loading, accounts, login, signup, googleAuth, logout, switchAccount, removeAccount, deleteAccount, refresh, updateUser }}>
       {children}
     </Ctx.Provider>
   );

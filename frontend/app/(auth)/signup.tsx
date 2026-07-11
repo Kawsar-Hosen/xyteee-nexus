@@ -18,10 +18,12 @@ import { useAuth } from "@/src/context/AuthContext";
 import { NxText } from "@/src/components/NxText";
 import { fonts, radii, spacing } from "@/src/theme";
 
+
 export default function SignUp() {
   const { colors } = useTheme();
   const { signup } = useAuth();
   const router = useRouter();
+
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -230,6 +232,8 @@ export default function SignUp() {
               <NxText style={{ color: colors.primary, fontFamily: fonts.bodySemi }}>Sign in</NxText>
             </NxText>
           </TouchableOpacity>
+
+          <View style={{ height: spacing.xl }} />
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
