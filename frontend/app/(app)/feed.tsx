@@ -10,7 +10,7 @@ import {
 } from "react-native";
 import { useRouter, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Feather } from "@expo/vector-icons";
+import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
 
@@ -262,26 +262,28 @@ export default function Feed() {
       <View style={styles.header}>
         <View style={{ flexDirection: "row", alignItems: "center" }}>
           <NexusMark size={28} />
-          <View style={{ width: 10 }} />
+          
           <View>
             <NxText variant="title" style={{ letterSpacing: 2 }}>XYTEEE</NxText>
             <NxText variant="caption" style={{ color: colors.primary, letterSpacing: 3, marginTop: -2 }}>NEXUS</NxText>
           </View>
         </View>
-        <TouchableOpacity
-          testID="feed-open-notifications"
-          onPress={() => router.push("/notifications")}
-          style={[styles.iconBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
-        >
-          <Feather name="bell" size={18} color={colors.foreground} />
-          {notifCount > 0 ? (
-            <View style={[styles.badge, { backgroundColor: colors.primary }]}>
-              <NxText style={{ color: colors.onPrimary, fontSize: 10, fontFamily: fonts.bodySemi }}>
-                {notifCount > 9 ? "9+" : notifCount}
-              </NxText>
-            </View>
-          ) : null}
-        </TouchableOpacity>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+<TouchableOpacity
+            testID="feed-open-notifications"
+            onPress={() => router.push("/notifications")}
+            style={[styles.iconBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
+          >
+            <Feather name="bell" size={18} color={colors.foreground} />
+            {notifCount > 0 ? (
+              <View style={[styles.badge, { backgroundColor: colors.primary }]}>
+                <NxText style={{ color: colors.onPrimary, fontSize: 10, fontFamily: fonts.bodySemi }}>
+                  {notifCount > 9 ? "9+" : notifCount}
+                </NxText>
+              </View>
+            ) : null}
+          </TouchableOpacity>
+        </View>
       </View>
 
       {loading ? (
@@ -378,7 +380,7 @@ export default function Feed() {
           }
         />
       )}
-    </SafeAreaView>
+</SafeAreaView>
   );
 }
 

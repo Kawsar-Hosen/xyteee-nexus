@@ -45,6 +45,7 @@ import { useVoiceRecorder } from "@/src/hooks/useVoiceRecorder";
 import { usePrivateVoiceCall } from "@/src/hooks/usePrivateVoiceCall";
 import { fonts, radii, spacing } from "@/src/theme";
 import { VerifiedBadge } from "@/src/components/VerifiedBadge";
+import VideoCallScreen from "@/src/components/calls/VideoCallScreen";
 
 const REACTIONS = ["❤️", "😂", "🔥", "😮", "😢", "👏", "👍"];
 
@@ -139,11 +140,16 @@ export default function ChatScreen() {
     callState,
     muted,
     speakerOn,
+    localStream,
+    remoteStream,
     startCall,
+    startVideoCall,
     acceptCall,
     endCall,
     toggleMute,
     toggleSpeaker,
+    toggleCamera,
+    toggleVideo,
   } = usePrivateVoiceCall({
     conversationId: conversation_id,
     token,
@@ -623,11 +629,42 @@ export default function ChatScreen() {
               <NxText variant="titleSm" numberOfLines={1}>{other?.display_name || "…"}</NxText>
               <VerifiedBadge badgeType={other?.badge_type} size={16} />
             </View>
-            <NxText variant="caption" style={{ color: otherTyping ? colors.primary : colors.mutedFg }}>
-              {otherTyping ? "typing…" : lastSeen}
+            <NxText
+              variant="caption"
+              style={{
+                color:
+                  callState === "calling"
+                    ? "#22C55E"
+                    : callState === "incoming"
+                    ? "#F59E0B"
+                    : otherTyping
+                    ? colors.primary
+                    : colors.mutedFg,
+              }}
+            >
+              {callState === "calling"
+                ? "📞 Calling..."
+                : callState === "incoming"
+                ? "📲 Incoming call..."
+                : callState === "connecting"
+                ? "Connecting..."
+                : callState === "active"
+                ? "In call"
+                : otherTyping
+                ? "typing…"
+                : lastSeen}
             </NxText>
           </View>
         </TouchableOpacity>
+        <TouchableOpacity
+          testID="chat-video-call"
+          onPress={startVideoCall}
+          disabled={callState !== "idle"}
+          style={styles.iconBtn}
+        >
+          <Feather name="video" size={20} color={colors.foreground} />
+        </TouchableOpacity>
+
         <TouchableOpacity
           testID="chat-voice-call"
           onPress={startCall}
@@ -881,6 +918,21 @@ export default function ChatScreen() {
           />
         </View>
       ) : null}
+
+      <VideoCallScreen
+        visible={callState === "active" && !!localStream}
+        localStream={localStream}
+        remoteStream={remoteStream}
+        muted={muted}
+        speakerOn={speakerOn}
+        videoEnabled={videoEnabled}
+        frontCamera={frontCamera}
+        onToggleMute={toggleMute}
+        onToggleSpeaker={toggleSpeaker}
+        onToggleCamera={toggleCamera}
+        onToggleVideo={toggleVideo}
+        onEnd={endCall}
+      />
 
       {/* ── Actions modal ─────────────────────────────────────────────── */}
       <Modal visible={!!actionMsg} transparent animationType="fade" onRequestClose={() => setActionMsg(null)}>

@@ -12,6 +12,8 @@ import { useAppFonts } from "@/src/hooks/use-app-fonts";
 import { ThemeProvider, useTheme } from "@/src/context/ThemeContext";
 import { AuthProvider, useAuth } from "@/src/context/AuthContext";
 import { WsProvider } from "@/src/context/WsContext";
+import { IncomingCallProvider } from "@/src/context/IncomingCallContext";
+import IncomingCallOverlay from "@/src/components/calls/IncomingCallOverlay";
 import { registerForPushNotifications, getNotificationRoute } from "@/src/lib/pushNotifications";
 import { api } from "@/src/api/client";
 
@@ -98,7 +100,10 @@ export default function RootLayout() {
         <ThemeProvider>
           <AuthProvider>
             <WsProvider>
-              <AppShell />
+              <IncomingCallProvider>
+                <AppShell />
+                <IncomingCallOverlay />
+              </IncomingCallProvider>
             </WsProvider>
           </AuthProvider>
         </ThemeProvider>

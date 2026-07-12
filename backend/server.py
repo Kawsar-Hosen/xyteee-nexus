@@ -3258,6 +3258,7 @@ async def get_pending_voice_call(
             "conversation_id": pending["conversation_id"],
             "caller_id": pending["caller_id"],
             "sdp": pending["sdp"],
+            "mode": pending.get("mode", "voice"),
         }
     }
 
@@ -3395,6 +3396,7 @@ async def websocket_endpoint(ws: WebSocket, token: str):
                                     "conversation_id": conv_id,
                                     "caller_id": user_id,
                                     "sdp": data.get("sdp"),
+                                    "mode": data.get("mode", "voice"),
                                     "expires_at": now_utc() + timedelta(seconds=60),
                                 }
 
@@ -3411,6 +3413,7 @@ async def websocket_endpoint(ws: WebSocket, token: str):
 
                     if t in {"call_offer", "call_answer"}:
                         payload["sdp"] = data.get("sdp")
+                        payload["mode"] = data.get("mode", "voice")
                     elif t == "call_ice":
                         payload["candidate"] = data.get("candidate")
 
@@ -3423,7 +3426,7 @@ async def websocket_endpoint(ws: WebSocket, token: str):
                                     caller = await get_user_public(user_id)
                                     await _send_expo_push(
                                         participant_id,
-                                        "voice_call",
+                                        data.get("mode", "voice") == "video" and "video_call" or "voice_call",
                                         {
                                             "from_user_id": user_id,
                                             "from_name": (

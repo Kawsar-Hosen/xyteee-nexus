@@ -41,6 +41,8 @@ export default function Welcome() {
   });
 
   React.useEffect(() => {
+    console.log("GOOGLE RESPONSE:", JSON.stringify(googleResponse, null, 2));
+
     if (googleResponse?.type !== "success") return;
 
     const idToken = googleResponse.params?.id_token;
