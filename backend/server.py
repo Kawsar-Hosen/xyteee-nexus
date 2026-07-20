@@ -3370,7 +3370,8 @@ async def websocket_endpoint(ws: WebSocket, token: str):
                                 "read_by_user_id": user_id,
                             })
 
-            elif t in {"call_offer", "call_answer", "call_ice", "call_end"}:
+            elif t in {"call_offer", "call_answer", "call_ice", "call_end",
+                       "video_call_offer", "video_call_answer", "video_call_ice", "video_call_end"}:
                 conv_id = data.get("conversation_id")
                 participants = typing_conversations.get(conv_id, [])
 
@@ -3409,9 +3410,10 @@ async def websocket_endpoint(ws: WebSocket, token: str):
                         "user_id": user_id,
                     }
 
-                    if t in {"call_offer", "call_answer"}:
+                    if t in {"call_offer", "call_answer",
+                             "video_call_offer", "video_call_answer"}:
                         payload["sdp"] = data.get("sdp")
-                    elif t == "call_ice":
+                    elif t in {"call_ice", "video_call_ice"}:
                         payload["candidate"] = data.get("candidate")
 
                     for participant_id in participants:
@@ -3437,6 +3439,28 @@ async def websocket_endpoint(ws: WebSocket, token: str):
                                 except Exception as e:
                                     logger.warning(
                                         "Voice call push failed: %s",
+                                        e,
+                                    )
+
+                            elif t == "video_call_offer":
+                                try:
+                                    caller = await get_user_public(user_id)
+                                    await _send_expo_push(
+                                        participant_id,
+                                        "video_call",
+                                        {
+                                            "from_user_id": user_id,
+                                            "from_name": (
+                                                caller.get("display_name")
+                                                if caller
+                                                else "Nexus User"
+                                            ),
+                                            "conversation_id": conv_id,
+                                        },
+                                    )
+                                except Exception as e:
+                                    logger.warning(
+                                        "Video call push failed: %s",
                                         e,
                                     )
 

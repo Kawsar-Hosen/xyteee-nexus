@@ -4,8 +4,8 @@ A real-time social chat platform with a FastAPI backend and React Native/Expo fr
 
 ## Stack
 
-- **Backend**: Python / FastAPI + MongoDB (via Motor async driver), JWT auth, WebSockets
-- **Frontend**: React Native / Expo (runs in browser via `expo start --web`)
+- **Backend**: Python / FastAPI + Supabase (PostgreSQL), JWT auth, WebSockets
+- **Frontend**: React Native / Expo (web preview via `expo start --web`, mobile via EAS build)
 
 ## Running on Replit
 
@@ -13,24 +13,49 @@ Two workflows are configured:
 
 | Workflow | Command | Port |
 |---|---|---|
-| Start Backend | `bash start_backend.sh` | 8000 (console) |
-| Start application | `bash start_frontend.sh` | 5000 (webview) |
+| Start Backend | `bash start_backend.sh` | 8000 (internal) |
+| Start application | `bash start_frontend.sh` | 5000 (webview, proxied) |
 
-The frontend auto-discovers the backend URL from `REPLIT_DEV_DOMAIN` at startup.
+The proxy on port 5000 routes `/api/*` → backend:8000 and `/*` → Expo:5001.
 
 ## Required Secrets
 
 Set these in Replit Secrets before starting:
 
-- `MONGO_URL` — MongoDB Atlas connection string
-- `JWT_SECRET` — secret key for signing JWTs (any long random string)
-- `DB_NAME` — MongoDB database name (env var, not a secret)
+| Secret | Description |
+|---|---|
+| `SUPABASE_URL` | Supabase project URL (`https://xxxx.supabase.co`) |
+| `SUPABASE_SERVICE_KEY` | Supabase service-role key |
+| `JWT_SECRET` | Secret key for signing JWTs (any long random string) |
+| `SESSION_SECRET` | Session secret (optional, used by some middleware) |
+
+## Building the APK
+
+See `BUILD_GUIDE.md` for EAS build instructions (APK / AAB / iOS).
+
+One-time DB migration required in Supabase SQL Editor:
+```sql
+ALTER TABLE users ADD COLUMN IF NOT EXISTS badge_type TEXT DEFAULT NULL;
+```
 
 ## Architecture
 
-- All API calls go through `EXPO_PUBLIC_BACKEND_URL + /api`
-- WebSocket at `/api/ws`
+- All API calls go through `/api` (relative URLs on web, via reverse proxy)
+- WebSocket at `/api/ws` — carries chat, typing, voice call, and video call signalling
 - Backend CORS is open (`allow_origins=["*"]`) for development
+
+## Call Signalling (WebSocket message types)
+
+| Direction | Type | Payload |
+|---|---|---|
+| C→S→C | `call_offer` | `{conversation_id, sdp}` — audio call offer |
+| C→S→C | `call_answer` | `{conversation_id, sdp}` |
+| C→S→C | `call_ice` | `{conversation_id, candidate}` |
+| C→S→C | `call_end` | `{conversation_id}` |
+| C→S→C | `video_call_offer` | `{conversation_id, sdp}` — video call offer |
+| C→S→C | `video_call_answer` | `{conversation_id, sdp}` |
+| C→S→C | `video_call_ice` | `{conversation_id, candidate}` |
+| C→S→C | `video_call_end` | `{conversation_id}` |
 
 ## User preferences
 

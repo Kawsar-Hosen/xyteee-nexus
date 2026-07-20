@@ -43,6 +43,8 @@ import { Avatar } from "@/src/components/Avatar";
 import { VoiceBubble } from "@/src/components/VoiceBubble";
 import { useVoiceRecorder } from "@/src/hooks/useVoiceRecorder";
 import { usePrivateVoiceCall } from "@/src/hooks/usePrivateVoiceCall";
+import { usePrivateVideoCall } from "@/src/hooks/usePrivateVideoCall";
+import { VideoView } from "@/src/components/VideoView";
 import { fonts, radii, spacing } from "@/src/theme";
 import { VerifiedBadge } from "@/src/components/VerifiedBadge";
 
@@ -145,6 +147,25 @@ export default function ChatScreen() {
     toggleMute,
     toggleSpeaker,
   } = usePrivateVoiceCall({
+    conversationId: conversation_id,
+    token,
+    subscribe,
+    send,
+  });
+
+  const {
+    callState: videoCallState,
+    muted: videoMuted,
+    cameraOff,
+    localStream,
+    remoteStream,
+    startCall: startVideoCall,
+    acceptCall: acceptVideoCall,
+    endCall: endVideoCall,
+    toggleMute: toggleVideoMute,
+    toggleCamera,
+    switchCamera,
+  } = usePrivateVideoCall({
     conversationId: conversation_id,
     token,
     subscribe,
@@ -605,6 +626,77 @@ export default function ChatScreen() {
         </View>
       </Modal>
 
+      {/* ── Video Call Overlay ──────────────────────────────────────── */}
+      <Modal
+        visible={videoCallState !== "idle"}
+        transparent={false}
+        animationType="slide"
+        onRequestClose={endVideoCall}
+      >
+        <View style={styles.videoCallContainer}>
+          {/* Remote video — full screen */}
+          {remoteStream ? (
+            <VideoView stream={remoteStream} style={styles.remoteVideo} objectFit="cover" zOrder={0} />
+          ) : (
+            <View style={[styles.remoteVideo, { backgroundColor: "#111", alignItems: "center", justifyContent: "center" }]}>
+              <Avatar uri={other?.profile_picture} name={other?.display_name} size={96} online={false} />
+              <NxText variant="title" style={{ color: "#fff", marginTop: 16 }}>
+                {videoCallState === "calling" ? "Calling…" : videoCallState === "incoming" ? "Incoming video call" : "Connecting…"}
+              </NxText>
+            </View>
+          )}
+
+          {/* Local video — picture-in-picture */}
+          {localStream && (
+            <VideoView
+              stream={localStream}
+              style={styles.localVideo}
+              objectFit="cover"
+              zOrder={1}
+              mirror
+            />
+          )}
+
+          {/* Controls */}
+          <View style={styles.videoCallControls}>
+            {videoCallState === "incoming" ? (
+              <>
+                <TouchableOpacity onPress={endVideoCall} style={[styles.videoCallBtn, { backgroundColor: "#E5484D" }]}>
+                  <Feather name="phone-off" size={26} color="#fff" />
+                </TouchableOpacity>
+                <TouchableOpacity onPress={acceptVideoCall} style={[styles.videoCallBtn, { backgroundColor: "#2DBE72" }]}>
+                  <Feather name="video" size={26} color="#fff" />
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <TouchableOpacity
+                  onPress={toggleVideoMute}
+                  style={[styles.videoCallBtn, { backgroundColor: videoMuted ? "#fff" : "rgba(255,255,255,0.2)" }]}
+                >
+                  <Feather name={videoMuted ? "mic-off" : "mic"} size={24} color={videoMuted ? "#000" : "#fff"} />
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={toggleCamera}
+                  style={[styles.videoCallBtn, { backgroundColor: cameraOff ? "#fff" : "rgba(255,255,255,0.2)" }]}
+                >
+                  <Feather name={cameraOff ? "video-off" : "video"} size={24} color={cameraOff ? "#000" : "#fff"} />
+                </TouchableOpacity>
+
+                <TouchableOpacity onPress={endVideoCall} style={[styles.videoCallBtn, { backgroundColor: "#E5484D" }]}>
+                  <Feather name="phone-off" size={26} color="#fff" />
+                </TouchableOpacity>
+
+                <TouchableOpacity onPress={switchCamera} style={[styles.videoCallBtn, { backgroundColor: "rgba(255,255,255,0.2)" }]}>
+                  <Feather name="refresh-cw" size={22} color="#fff" />
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
+
       {/* ── Header ──────────────────────────────────────────────────── */}
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
         <TouchableOpacity testID="chat-back" onPress={() => router.back()} style={styles.iconBtn}>
@@ -635,6 +727,15 @@ export default function ChatScreen() {
           style={styles.iconBtn}
         >
           <Feather name="phone" size={20} color={colors.foreground} />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          testID="chat-video-call"
+          onPress={startVideoCall}
+          disabled={videoCallState !== "idle"}
+          style={styles.iconBtn}
+        >
+          <Feather name="video" size={20} color={colors.foreground} />
         </TouchableOpacity>
 
         <TouchableOpacity testID="chat-search-toggle" onPress={() => setShowSearch((s) => !s)} style={styles.iconBtn}>
@@ -1431,5 +1532,43 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     paddingLeft: 10,
+  },
+  videoCallContainer: {
+    flex: 1,
+    backgroundColor: "#000",
+  },
+  remoteVideo: {
+    flex: 1,
+    width: "100%",
+  },
+  localVideo: {
+    position: "absolute",
+    top: 52,
+    right: 16,
+    width: 100,
+    height: 150,
+    borderRadius: 12,
+    overflow: "hidden",
+    zIndex: 10,
+    borderWidth: 2,
+    borderColor: "rgba(255,255,255,0.4)",
+  },
+  videoCallControls: {
+    position: "absolute",
+    bottom: 48,
+    left: 0,
+    right: 0,
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 20,
+    paddingHorizontal: 24,
+  },
+  videoCallBtn: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    alignItems: "center",
+    justifyContent: "center",
   },
 });

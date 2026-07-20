@@ -1,16 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api } from "@/src/api/client";
 
-type CallState = "idle" | "calling" | "incoming" | "connecting" | "active";
+type VideoCallState = "idle" | "calling" | "incoming" | "connecting" | "active";
 
 const ICE_SERVERS = [
   { urls: "stun:stun.l.google.com:19302" },
   { urls: "stun:stun1.l.google.com:19302" },
 ];
 
-// Lazy-load native modules so they are only initialised when a call
-// is actually started — this prevents the modules from crashing the
-// chat screen on mount (the root cause of the "tap chat → app exits" bug).
+// Lazy-load native modules — prevents crash on chat screen mount.
 function requireWebRTC() {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   return require("react-native-webrtc") as {
@@ -18,7 +15,6 @@ function requireWebRTC() {
     RTCPeerConnection: any;
     RTCIceCandidate: any;
     RTCSessionDescription: any;
-    MediaStream: any;
   };
 }
 
@@ -27,7 +23,7 @@ function requireInCallManager(): any {
   return (require("react-native-incall-manager") as any).default;
 }
 
-export function usePrivateVoiceCall({
+export function usePrivateVideoCall({
   conversationId,
   token,
   subscribe,
@@ -38,26 +34,30 @@ export function usePrivateVoiceCall({
   subscribe: (listener: (event: any) => void) => () => void;
   send: (payload: any) => void;
 }) {
-  const [callState, setCallState] = useState<CallState>("idle");
+  const [callState, setCallState] = useState<VideoCallState>("idle");
   const [muted, setMuted] = useState(false);
-  const [speakerOn, setSpeakerOn] = useState(false);
+  const [cameraOff, setCameraOff] = useState(false);
+  const [localStream, setLocalStream] = useState<any>(null);
+  const [remoteStream, setRemoteStream] = useState<any>(null);
 
   const peerRef = useRef<any>(null);
   const localStreamRef = useRef<any>(null);
   const pendingOfferRef = useRef<any>(null);
   const pendingIceRef = useRef<any[]>([]);
+  const frontCameraRef = useRef<boolean>(true);
 
   const cleanup = useCallback(() => {
     try {
       const InCallManager = requireInCallManager();
-      InCallManager.setForceSpeakerphoneOn(null);
       InCallManager.stop();
     } catch {}
 
     try {
-      localStreamRef.current?.getTracks().forEach((track: any) => track.stop());
+      localStreamRef.current?.getTracks().forEach((t: any) => t.stop());
     } catch {}
     localStreamRef.current = null;
+    setLocalStream(null);
+    setRemoteStream(null);
 
     try {
       peerRef.current?.close();
@@ -66,8 +66,9 @@ export function usePrivateVoiceCall({
 
     pendingOfferRef.current = null;
     pendingIceRef.current = [];
+    frontCameraRef.current = true;
     setMuted(false);
-    setSpeakerOn(false);
+    setCameraOff(false);
     setCallState("idle");
   }, []);
 
@@ -79,14 +80,13 @@ export function usePrivateVoiceCall({
 
     const stream = await mediaDevices.getUserMedia({
       audio: true,
-      video: false,
+      video: { facingMode: "user" },
     });
 
     localStreamRef.current = stream;
+    setLocalStream(stream);
 
-    InCallManager.start({ media: "audio" });
-    InCallManager.setForceSpeakerphoneOn(false);
-    setSpeakerOn(false);
+    InCallManager.start({ media: "video" });
 
     const peer = new RTCPeerConnection({ iceServers: ICE_SERVERS });
 
@@ -94,10 +94,16 @@ export function usePrivateVoiceCall({
       peer.addTrack(track, stream);
     });
 
+    (peer as any).addEventListener("track", (event: any) => {
+      if (event.streams && event.streams[0]) {
+        setRemoteStream(event.streams[0]);
+      }
+    });
+
     (peer as any).addEventListener("icecandidate", (event: any) => {
       if (event.candidate) {
         send({
-          type: "call_ice",
+          type: "video_call_ice",
           conversation_id: conversationId,
           candidate: event.candidate.toJSON(),
         });
@@ -137,7 +143,7 @@ export function usePrivateVoiceCall({
       const offer = await peer.createOffer();
       await peer.setLocalDescription(offer);
       send({
-        type: "call_offer",
+        type: "video_call_offer",
         conversation_id: conversationId,
         sdp: offer,
       });
@@ -158,7 +164,7 @@ export function usePrivateVoiceCall({
       const answer = await peer.createAnswer();
       await peer.setLocalDescription(answer);
       send({
-        type: "call_answer",
+        type: "video_call_answer",
         conversation_id: conversationId,
         sdp: answer,
       });
@@ -169,60 +175,57 @@ export function usePrivateVoiceCall({
 
   const endCall = useCallback(() => {
     if (callState !== "idle") {
-      send({ type: "call_end", conversation_id: conversationId });
+      send({ type: "video_call_end", conversation_id: conversationId });
     }
     cleanup();
   }, [callState, cleanup, conversationId, send]);
 
-  const toggleSpeaker = useCallback(() => {
-    try {
-      const InCallManager = requireInCallManager();
-      const next = !speakerOn;
-      InCallManager.setForceSpeakerphoneOn(next);
-      setSpeakerOn(next);
-    } catch {}
-  }, [speakerOn]);
-
   const toggleMute = useCallback(() => {
     const next = !muted;
-    localStreamRef.current?.getAudioTracks().forEach((track: any) => {
-      track.enabled = !next;
+    localStreamRef.current?.getAudioTracks().forEach((t: any) => {
+      t.enabled = !next;
     });
     setMuted(next);
   }, [muted]);
 
-  // Check for a pending incoming call when the screen opens.
-  useEffect(() => {
-    if (!token || !conversationId) return;
-    let cancelled = false;
-    api<{ call: any }>("/calls/pending", {
-      token,
-      query: { conversation_id: conversationId },
-    })
-      .then((result) => {
-        if (cancelled || !result.call) return;
-        pendingOfferRef.current = result.call.sdp;
-        setCallState("incoming");
-      })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, [conversationId, token]);
+  const toggleCamera = useCallback(() => {
+    const next = !cameraOff;
+    localStreamRef.current?.getVideoTracks().forEach((t: any) => {
+      t.enabled = !next;
+    });
+    setCameraOff(next);
+  }, [cameraOff]);
 
-  // Subscribe to real-time call signalling events.
+  const switchCamera = useCallback(async () => {
+    const videoTrack = localStreamRef.current
+      ?.getVideoTracks()
+      ?.find(() => true);
+    if (!videoTrack) return;
+    try {
+      // react-native-webrtc exposes _switchCamera on the track
+      if (typeof (videoTrack as any)._switchCamera === "function") {
+        (videoTrack as any)._switchCamera();
+      }
+      frontCameraRef.current = !frontCameraRef.current;
+    } catch {}
+  }, []);
+
+  // Subscribe to real-time video call signalling events.
   useEffect(() => {
     return subscribe(async (event: any) => {
       if (event.conversation_id !== conversationId) return;
-      if (event.type === "call_offer") {
+
+      if (event.type === "video_call_offer") {
         pendingOfferRef.current = event.sdp;
         setCallState("incoming");
-      } else if (event.type === "call_answer") {
+      } else if (event.type === "video_call_answer") {
         const peer = peerRef.current;
         if (!peer) return;
         const { RTCSessionDescription } = requireWebRTC();
         await peer.setRemoteDescription(new RTCSessionDescription(event.sdp));
         await flushPendingIce();
         setCallState("connecting");
-      } else if (event.type === "call_ice") {
+      } else if (event.type === "video_call_ice") {
         const peer = peerRef.current;
         const { RTCIceCandidate } = requireWebRTC();
         if (peer?.remoteDescription) {
@@ -230,7 +233,7 @@ export function usePrivateVoiceCall({
         } else {
           pendingIceRef.current.push(event.candidate);
         }
-      } else if (event.type === "call_end") {
+      } else if (event.type === "video_call_end") {
         cleanup();
       }
     });
@@ -241,11 +244,14 @@ export function usePrivateVoiceCall({
   return {
     callState,
     muted,
-    speakerOn,
+    cameraOff,
+    localStream,
+    remoteStream,
     startCall,
     acceptCall,
     endCall,
     toggleMute,
-    toggleSpeaker,
+    toggleCamera,
+    switchCamera,
   };
 }
