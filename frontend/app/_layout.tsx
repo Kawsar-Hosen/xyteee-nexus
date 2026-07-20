@@ -12,11 +12,18 @@ import { useAppFonts } from "@/src/hooks/use-app-fonts";
 import { ThemeProvider, useTheme } from "@/src/context/ThemeContext";
 import { AuthProvider, useAuth } from "@/src/context/AuthContext";
 import { WsProvider } from "@/src/context/WsContext";
-import { registerForPushNotifications, getNotificationRoute } from "@/src/lib/pushNotifications";
+import {
+  registerForPushNotifications,
+  setupNotificationChannelsAndCategories,
+  getNotificationRoute,
+} from "@/src/lib/pushNotifications";
 import { api } from "@/src/api/client";
 
 LogBox.ignoreAllLogs(true);
 SplashScreen.preventAutoHideAsync();
+
+// Set up channels/categories as early as possible (before permission prompt)
+setupNotificationChannelsAndCategories().catch(() => {});
 
 function AppShell() {
   const { mode, colors } = useTheme();
@@ -38,13 +45,50 @@ function AppShell() {
       })
       .catch((err) => console.warn("Push registration failed:", err));
   }, [user?.user_id, token]);
+
   useEffect(() => {
-    const openNotification = (
+    const openNotification = async (
       response: Notifications.NotificationResponse
     ) => {
       const data = response.notification.request.content.data;
-      const route = getNotificationRoute(data);
+      const actionId = response.actionIdentifier;
 
+      // ── Inline reply action from notification ──────────────────────
+      if (
+        actionId === "reply" &&
+        (response as any).userText &&
+        data?.conversation_id &&
+        token
+      ) {
+        const replyText = ((response as any).userText as string).trim();
+        if (replyText) {
+          try {
+            await api("/chats/message", {
+              method: "POST",
+              token,
+              body: {
+                conversation_id: data.conversation_id,
+                content: replyText,
+                kind: "text",
+              },
+            });
+          } catch (e) {
+            console.warn("Inline reply failed:", e);
+          }
+        }
+        // Also navigate to the chat after replying
+        router.push(`/chat/${data.conversation_id}` as any);
+        return;
+      }
+
+      // ── Mark as read action ────────────────────────────────────────
+      if (actionId === "mark_read") {
+        // Nothing extra needed — just don't navigate
+        return;
+      }
+
+      // ── Default: tap on notification → open route ──────────────────
+      const route = getNotificationRoute(data);
       if (route) {
         router.push(route as any);
       }
@@ -64,7 +108,7 @@ function AppShell() {
       .catch(() => {});
 
     return () => subscription.remove();
-  }, [router]);
+  }, [router, token]);
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>

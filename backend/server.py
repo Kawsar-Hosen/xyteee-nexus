@@ -213,7 +213,8 @@ async def _send_expo_push(to_user: str, kind: str, data: dict):
         "friend_request": "New friend request",
         "friend_accepted": "Friend request accepted",
         "message": "New message",
-        "voice_call": "Incoming voice call",
+        "voice_call": "📞 Incoming voice call",
+        "video_call": "📹 Incoming video call",
         "story": "New story notification",
         "circle_invite": "New Circle invitation",
         "circle_invite_accepted": "Circle invitation accepted",
@@ -233,7 +234,8 @@ async def _send_expo_push(to_user: str, kind: str, data: dict):
         "friend_request": f"{from_name} sent you a friend request",
         "friend_accepted": f"{from_name} accepted your friend request",
         "message": f"{from_name}: {data.get('preview') or 'Sent you a message'}",
-        "voice_call": f"{from_name} is calling you",
+        "voice_call": f"{from_name} is calling you…",
+        "video_call": f"{from_name} is video calling you…",
         "story": f"{from_name} added a new story",
         "circle_invite": f"{from_name} invited you to {data.get('circle_name') or 'a Circle'}",
         "circle_invite_accepted": f"{from_name} accepted your invitation to {data.get('circle_name') or 'the Circle'}",
@@ -247,16 +249,32 @@ async def _send_expo_push(to_user: str, kind: str, data: dict):
         "circle_message": f"{from_name}: {data.get('preview') or 'Sent a message'}",
     }
 
-    messages = [
-        {
+    # Call notifications use a dedicated high-priority channel and no category.
+    # Message notifications attach the "message" category so the user can reply
+    # inline from the lock screen / notification shade.
+    is_call = kind in ("voice_call", "video_call")
+    is_message = kind in ("message", "circle_message")
+
+    def build_message(token: str) -> dict:
+        msg: dict = {
             "to": token,
             "sound": "default",
             "title": title_map.get(kind, "XYTEEE Nexus"),
             "body": data.get("message") or data.get("body") or body_map.get(kind, "You have a new notification"),
             "data": {"kind": kind, **jsonable(data)},
+            # High priority ensures timely delivery on both iOS and Android
+            "priority": "high" if is_call else "normal",
         }
-        for token in tokens
-    ]
+        if is_call:
+            # Android: route to the calls channel (MAX importance, bypass DnD)
+            msg["channelId"] = "calls"
+        elif is_message:
+            # Android: route to default channel; add reply category on iOS
+            msg["channelId"] = "default"
+            msg["categoryIdentifier"] = "message"
+        return msg
+
+    messages = [build_message(token) for token in tokens]
 
     async with httpx.AsyncClient(timeout=10) as client:
         response = await client.post(

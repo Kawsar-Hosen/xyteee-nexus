@@ -42,7 +42,7 @@ import { NxText } from "@/src/components/NxText";
 import { Avatar } from "@/src/components/Avatar";
 import { VoiceBubble } from "@/src/components/VoiceBubble";
 import { useVoiceRecorder } from "@/src/hooks/useVoiceRecorder";
-import { usePrivateVoiceCall } from "@/src/hooks/usePrivateVoiceCall";
+import { usePrivateVoiceCall, formatCallDuration } from "@/src/hooks/usePrivateVoiceCall";
 import { usePrivateVideoCall } from "@/src/hooks/usePrivateVideoCall";
 import { VideoView } from "@/src/components/VideoView";
 import { fonts, radii, spacing } from "@/src/theme";
@@ -141,6 +141,7 @@ export default function ChatScreen() {
     callState,
     muted,
     speakerOn,
+    callDuration,
     startCall,
     acceptCall,
     endCall,
@@ -159,6 +160,7 @@ export default function ChatScreen() {
     cameraOff,
     localStream,
     remoteStream,
+    callDuration: videoCallDuration,
     startCall: startVideoCall,
     acceptCall: acceptVideoCall,
     endCall: endVideoCall,
@@ -506,7 +508,7 @@ export default function ChatScreen() {
         : callState === "connecting"
           ? "Connecting…"
           : callState === "active"
-            ? "Voice call"
+            ? formatCallDuration(callDuration)
             : "";
 
   return (
@@ -642,6 +644,15 @@ export default function ChatScreen() {
               <Avatar uri={other?.profile_picture} name={other?.display_name} size={96} online={false} />
               <NxText variant="title" style={{ color: "#fff", marginTop: 16 }}>
                 {videoCallState === "calling" ? "Calling…" : videoCallState === "incoming" ? "Incoming video call" : "Connecting…"}
+              </NxText>
+            </View>
+          )}
+
+          {/* Call duration — shown top-centre when active */}
+          {videoCallState === "active" && (
+            <View style={styles.videoCallTimer}>
+              <NxText style={{ color: "#fff", fontSize: 15, fontFamily: fonts.bodySemi, letterSpacing: 1 }}>
+                {formatCallDuration(videoCallDuration)}
               </NxText>
             </View>
           )}
@@ -1570,5 +1581,13 @@ const styles = StyleSheet.create({
     borderRadius: 32,
     alignItems: "center",
     justifyContent: "center",
+  },
+  videoCallTimer: {
+    position: "absolute",
+    top: 52,
+    left: 0,
+    right: 0,
+    alignItems: "center",
+    zIndex: 20,
   },
 });

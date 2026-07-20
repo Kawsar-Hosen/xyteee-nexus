@@ -23,6 +23,13 @@ function requireInCallManager(): any {
   return (require("react-native-incall-manager") as any).default;
 }
 
+/** Format seconds → "m:ss" */
+export function formatCallDuration(secs: number): string {
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
 export function usePrivateVideoCall({
   conversationId,
   token,
@@ -39,14 +46,34 @@ export function usePrivateVideoCall({
   const [cameraOff, setCameraOff] = useState(false);
   const [localStream, setLocalStream] = useState<any>(null);
   const [remoteStream, setRemoteStream] = useState<any>(null);
+  const [callDuration, setCallDuration] = useState(0);
 
   const peerRef = useRef<any>(null);
   const localStreamRef = useRef<any>(null);
   const pendingOfferRef = useRef<any>(null);
   const pendingIceRef = useRef<any[]>([]);
   const frontCameraRef = useRef<boolean>(true);
+  const ringStateRef = useRef<"none" | "ringback" | "ringtone">("none");
+  const durationTimerRef = useRef<any>(null);
+
+  const stopAllSounds = useCallback(() => {
+    try {
+      const InCallManager = requireInCallManager();
+      if (ringStateRef.current === "ringback") InCallManager.stopRingback();
+      if (ringStateRef.current === "ringtone") InCallManager.stopRingtone();
+    } catch {}
+    ringStateRef.current = "none";
+  }, []);
 
   const cleanup = useCallback(() => {
+    stopAllSounds();
+
+    if (durationTimerRef.current) {
+      clearInterval(durationTimerRef.current);
+      durationTimerRef.current = null;
+    }
+    setCallDuration(0);
+
     try {
       const InCallManager = requireInCallManager();
       InCallManager.stop();
@@ -70,7 +97,47 @@ export function usePrivateVideoCall({
     setMuted(false);
     setCameraOff(false);
     setCallState("idle");
-  }, []);
+  }, [stopAllSounds]);
+
+  // Manage ringing sounds and call timer based on callState changes.
+  useEffect(() => {
+    if (callState === "calling") {
+      // Caller hears ringback (outgoing ringing tone)
+      try {
+        const InCallManager = requireInCallManager();
+        InCallManager.startRingback("_DTMF_");
+        ringStateRef.current = "ringback";
+      } catch {}
+    } else if (callState === "incoming") {
+      // Receiver phone rings
+      try {
+        const InCallManager = requireInCallManager();
+        InCallManager.startRingtone("_DEFAULT_");
+        ringStateRef.current = "ringtone";
+      } catch {}
+    } else if (callState === "active") {
+      // Call connected — stop all sounds and start the duration timer
+      stopAllSounds();
+      setCallDuration(0);
+      durationTimerRef.current = setInterval(() => {
+        setCallDuration((d) => d + 1);
+      }, 1000);
+    } else {
+      // idle / connecting — stop sounds, clear timer
+      stopAllSounds();
+      if (durationTimerRef.current) {
+        clearInterval(durationTimerRef.current);
+        durationTimerRef.current = null;
+      }
+    }
+
+    return () => {
+      if (callState === "active" && durationTimerRef.current) {
+        clearInterval(durationTimerRef.current);
+        durationTimerRef.current = null;
+      }
+    };
+  }, [callState, stopAllSounds]);
 
   const createPeer = useCallback(async () => {
     if (peerRef.current) return peerRef.current;
@@ -247,6 +314,7 @@ export function usePrivateVideoCall({
     cameraOff,
     localStream,
     remoteStream,
+    callDuration,
     startCall,
     acceptCall,
     endCall,

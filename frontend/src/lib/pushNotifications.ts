@@ -13,17 +13,52 @@ Notifications.setNotificationHandler({
   }),
 });
 
-export async function registerForPushNotifications() {
-  if (Platform.OS === "web" || !Device.isDevice) return null;
-
+/** Register Android notification channels and iOS notification categories.
+ *  Must be called once at app start (before requesting permission). */
+export async function setupNotificationChannelsAndCategories() {
   if (Platform.OS === "android") {
+    // Default channel — messages, friend requests, etc.
     await Notifications.setNotificationChannelAsync("default", {
-      name: "Default",
-      importance: Notifications.AndroidImportance.MAX,
+      name: "General",
+      importance: Notifications.AndroidImportance.HIGH,
       vibrationPattern: [0, 250, 250, 250],
       sound: "default",
     });
+
+    // High-priority calls channel — shows heads-up notification even when phone is idle
+    await Notifications.setNotificationChannelAsync("calls", {
+      name: "Incoming Calls",
+      importance: Notifications.AndroidImportance.MAX,
+      vibrationPattern: [0, 500, 200, 500],
+      sound: "default",
+      enableLights: true,
+      enableVibrate: true,
+      bypassDnd: true,
+    });
   }
+
+  // Notification category: message — adds inline Reply action
+  await Notifications.setNotificationCategoryAsync("message", [
+    {
+      identifier: "reply",
+      buttonTitle: "Reply",
+      textInput: {
+        submitButtonTitle: "Send",
+        placeholder: "Type a message…",
+      },
+    },
+    {
+      identifier: "mark_read",
+      buttonTitle: "Mark as read",
+      options: { isDestructive: false, isAuthenticationRequired: false },
+    },
+  ]);
+}
+
+export async function registerForPushNotifications() {
+  if (Platform.OS === "web" || !Device.isDevice) return null;
+
+  await setupNotificationChannelsAndCategories();
 
   const current = await Notifications.getPermissionsAsync();
   let status = current.status;
@@ -55,7 +90,8 @@ export function getNotificationRoute(data: any): string | null {
     (
       kind === "message" ||
       kind === "message_reaction" ||
-      kind === "voice_call"
+      kind === "voice_call" ||
+      kind === "video_call"
     ) &&
     data?.conversation_id
   ) {
