@@ -9,6 +9,8 @@ packages = ["cargo", "libiconv", "libxcrypt", "rustc"]
 [userenv]
 
 [userenv.shared]
+GOOGLE_ANDROID_CLIENT_ID = "940343114841-mn3e2li540kf9m5jg5ckom6vst9d784h.apps.googleusercontent.com"
+GOOGLE_WEB_CLIENT_ID = "940343114841-1jv65pbtqmurbl1hoacnre2iqoqtgq48.apps.googleusercontent.com"
 
 [workflows]
 runButton = "Project"

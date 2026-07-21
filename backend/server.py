@@ -683,9 +683,11 @@ If you did not create this account, please contact XYTEEE Nexus support.
 
 @api.post("/auth/google")
 async def google_auth(body: GoogleAuthIn):
-    google_client_id = os.environ.get("GOOGLE_WEB_CLIENT_ID", "").strip()
+    web_client_id = os.environ.get("GOOGLE_WEB_CLIENT_ID", "").strip()
+    android_client_id = os.environ.get("GOOGLE_ANDROID_CLIENT_ID", "").strip()
 
-    if not google_client_id:
+    valid_client_ids = {cid for cid in [web_client_id, android_client_id] if cid}
+    if not valid_client_ids:
         raise HTTPException(status_code=500, detail="Google Sign-In is not configured")
 
     async with httpx.AsyncClient(timeout=15.0) as client:
@@ -699,7 +701,7 @@ async def google_auth(body: GoogleAuthIn):
 
     info = response.json()
 
-    if info.get("aud") != google_client_id:
+    if info.get("aud") not in valid_client_ids:
         raise HTTPException(status_code=401, detail="Invalid Google token audience")
 
     email = str(info.get("email") or "").strip().lower()
