@@ -30,6 +30,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import * as Haptics from "expo-haptics";
+import * as FileSystem from "expo-file-system/legacy";
 import dayjs from "dayjs";
 import * as Clipboard from "expo-clipboard";
 import { EmojiKeyboard } from "rn-emoji-keyboard";
@@ -443,12 +444,26 @@ export default function ChatScreen() {
     if (!result) return;
     setSending(true);
     try {
+      // Convert local audio file to base64 data URL so the recipient can play it.
+      // A raw local file:// URI is only accessible on the sender's device.
+      let mediaData: string = result.uri;
+      if (Platform.OS !== "web" && result.uri.startsWith("file://")) {
+        try {
+          const b64 = await FileSystem.readAsStringAsync(result.uri, {
+            encoding: FileSystem.EncodingType.Base64,
+          });
+          mediaData = `data:audio/m4a;base64,${b64}`;
+        } catch {
+          // fallback to raw uri if read fails (shouldn't normally happen)
+        }
+      }
+
       await api("/chats/message", {
         method: "POST",
         body: {
           conversation_id,
           kind: "voice",
-          media: result.uri,
+          media: mediaData,
           content: result.durationStr,
         },
         token: token!,

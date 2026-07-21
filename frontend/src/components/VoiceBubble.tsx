@@ -1,10 +1,11 @@
 /**
  * VoiceBubble — NATIVE implementation.
- * Shows the waveform UI. Playback alerts user to install expo-audio.
+ * Shows the waveform UI and handles playback.
  * The web implementation (VoiceBubble.web.tsx) is used for web builds.
  */
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
+import * as FileSystem from "expo-file-system/legacy";
 import { View, TouchableOpacity, StyleSheet } from "react-native";
 import Animated, {
   useSharedValue,
@@ -56,7 +57,30 @@ export function VoiceBubble({
   const bg = isMe ? colors.primary : colors.surface;
   const border = isMe ? "transparent" : colors.border;
   const durSec = parseDuration(duration || "0:00");
-  const player = useAudioPlayer(mediaUri);
+
+  // If the media is a base64 data URL (sent from the recorder), we must write it
+  // to a temporary file first — expo-audio cannot play data: URIs on Android.
+  const [localUri, setLocalUri] = useState<string>("");
+  useEffect(() => {
+    if (!mediaUri) return;
+    if (mediaUri.startsWith("data:audio/")) {
+      // Extract base64 payload (everything after the comma)
+      const commaIdx = mediaUri.indexOf(",");
+      if (commaIdx === -1) return;
+      const b64 = mediaUri.slice(commaIdx + 1);
+      const ext = mediaUri.includes("audio/m4a") ? "m4a" : "aac";
+      const path = `${FileSystem.cacheDirectory}voice_${messageId}.${ext}`;
+      FileSystem.writeAsStringAsync(path, b64, {
+        encoding: FileSystem.EncodingType.Base64,
+      })
+        .then(() => setLocalUri(path))
+        .catch(() => setLocalUri(mediaUri)); // fallback
+    } else {
+      setLocalUri(mediaUri);
+    }
+  }, [mediaUri, messageId]);
+
+  const player = useAudioPlayer(localUri);
   const status = useAudioPlayerStatus(player);
   const totalDuration = status.duration || durSec || 1;
   const progress = Math.min(
