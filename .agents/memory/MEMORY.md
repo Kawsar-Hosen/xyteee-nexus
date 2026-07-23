@@ -5,3 +5,4 @@
 - [Badge type column](badge-migration.md) — badge_type TEXT DEFAULT NULL added to users table; must be added manually via Supabase SQL Editor (PostgREST cannot run DDL).
 - [Frontend node_modules install](frontend-node-install.md) — yarn install only works inside a workflow (not bash sandbox); start_frontend.sh auto-installs if node_modules/expo-router is missing; use CI=1 for non-interactive expo start.
 - [expo-av blocked by cmd-guard](cmd-guard-audio.md) — expo-av is blocked in package.json by the preinstall cmd-guard; use platform-specific files (.web.ts/.ts) to avoid bundling native audio on web; exec syntax in bash: use `export CI=1 && exec npx` not `exec CI=1 npx`.
+- [Gemini model selection](gemini-model-selection.md) — use gemini-3.5-flash; gemini-2.0-flash has quota=0, gemini-2.5-flash deprecated for new users.

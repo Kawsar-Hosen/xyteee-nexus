@@ -4035,7 +4035,7 @@ async def ai_chat(body: AiChatRequest):
 
     try:
         chat = client.chats.create(
-            model="gemini-2.0-flash",
+            model="gemini-3.5-flash",
             config=_genai_types.GenerateContentConfig(
                 system_instruction=_AI_SYSTEM_PROMPT,
                 max_output_tokens=512,
