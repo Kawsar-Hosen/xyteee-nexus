@@ -9,6 +9,7 @@ import Animated, { useAnimatedStyle, withSpring } from "react-native-reanimated"
 import { useTheme } from "@/src/context/ThemeContext";
 import { NxText } from "@/src/components/NxText";
 import { AIChatBox } from "@/src/components/AIChatBox";
+import { AIChatProvider } from "@/src/context/AIChatContext";
 import { spacing } from "@/src/theme";
 
 type Tab = { key: string; path: string; icon: keyof typeof Feather.glyphMap; label: string };
@@ -33,11 +34,15 @@ export default function AppLayout() {
   }, [path]);
 
   return (
+    <AIChatProvider>
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <View style={{ flex: 1 }}>
         <Slot />
       </View>
-      <AIChatBox />
+      {/* AI chat overlay — rendered above all content */}
+      <View style={StyleSheet.absoluteFillObject} pointerEvents="box-none">
+        <AIChatBox />
+      </View>
       <SafeAreaView edges={["bottom"]} style={styles.dockWrap} pointerEvents="box-none">
         <View style={styles.dockShell} pointerEvents="box-none">
           <BlurView
@@ -84,6 +89,7 @@ export default function AppLayout() {
         <View style={{ height: Math.max(insets.bottom, 8) }} />
       </SafeAreaView>
     </View>
+    </AIChatProvider>
   );
 }
 
