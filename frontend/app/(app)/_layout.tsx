@@ -8,6 +8,7 @@ import Animated, { useAnimatedStyle, withSpring } from "react-native-reanimated"
 
 import { useTheme } from "@/src/context/ThemeContext";
 import { NxText } from "@/src/components/NxText";
+import { AIChatBox } from "@/src/components/AIChatBox";
 import { spacing } from "@/src/theme";
 
 type Tab = { key: string; path: string; icon: keyof typeof Feather.glyphMap; label: string };
@@ -36,6 +37,7 @@ export default function AppLayout() {
       <View style={{ flex: 1 }}>
         <Slot />
       </View>
+      <AIChatBox />
       <SafeAreaView edges={["bottom"]} style={styles.dockWrap} pointerEvents="box-none">
         <View style={styles.dockShell} pointerEvents="box-none">
           <BlurView

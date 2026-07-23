@@ -3979,5 +3979,66 @@ async def save_push_token(body: PushTokenIn, user=Depends(current_user)):
 
     return {"ok": True}
 
+# ── AI Support Chat ────────────────────────────────────────────────────────────
+
+from openai import AsyncOpenAI
+
+_openai_client: Optional[AsyncOpenAI] = None
+
+def get_openai() -> AsyncOpenAI:
+    global _openai_client
+    if _openai_client is None:
+        key = os.environ.get("OPENAI_API_KEY", "")
+        if not key:
+            raise HTTPException(status_code=503, detail="AI service not configured")
+        _openai_client = AsyncOpenAI(api_key=key)
+    return _openai_client
+
+_AI_SYSTEM_PROMPT = """You are the XYTEEE Nexus in-app support assistant — friendly, concise, and helpful.
+XYTEEE Nexus is a real-time social chat platform. Key features:
+- Chat: 1-on-1 and group "Circles" with real-time messaging, voice messages, reactions
+- Voice & video calls via WebRTC
+- Stories / Feed posts
+- Friend Bonds: send/accept/reject friend requests
+- Search: find users by name or username and send requests
+- Profile: customize display name, bio, avatar, cover photo, privacy settings
+- Notifications: push notifications for messages, calls, friend requests
+- Admin panel: badge assignment (Silver / Gold / Diamond premium)
+- Premium badges appear next to usernames
+Answer questions about using the app. Be warm, brief (2-4 sentences max unless more detail is clearly needed), and always helpful.
+If you don't know something, say so honestly. Never make up features that don't exist."""
+
+class AiChatMessage(BaseModel):
+    role: str   # "user" or "assistant"
+    content: str
+
+class AiChatRequest(BaseModel):
+    messages: List[AiChatMessage]
+
+class AiChatResponse(BaseModel):
+    reply: str
+
+@api.post("/ai/chat", response_model=AiChatResponse)
+async def ai_chat(body: AiChatRequest):
+    """AI support chat — no auth required so unauthenticated users can also get help."""
+    client = get_openai()
+    # Keep last 20 messages to bound context cost
+    history = body.messages[-20:]
+    openai_messages = [{"role": "system", "content": _AI_SYSTEM_PROMPT}] + [
+        {"role": m.role, "content": m.content} for m in history
+    ]
+    try:
+        resp = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=openai_messages,
+            max_tokens=512,
+            temperature=0.7,
+        )
+        reply = resp.choices[0].message.content or "Sorry, I couldn't generate a response."
+    except Exception as exc:
+        logger.error("OpenAI error: %s", exc)
+        raise HTTPException(status_code=502, detail="AI service temporarily unavailable")
+    return {"reply": reply}
+
 # Include API router only after every @api route has been registered.
 app.include_router(api)
