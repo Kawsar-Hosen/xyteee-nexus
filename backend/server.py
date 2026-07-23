@@ -3979,20 +3979,21 @@ async def save_push_token(body: PushTokenIn, user=Depends(current_user)):
 
     return {"ok": True}
 
-# ── AI Support Chat ────────────────────────────────────────────────────────────
+# ── AI Support Chat (Gemini) ───────────────────────────────────────────────────
 
-from openai import AsyncOpenAI
+from google import genai as _genai
+from google.genai import types as _genai_types
 
-_openai_client: Optional[AsyncOpenAI] = None
+_gemini_client: Optional[_genai.Client] = None
 
-def get_openai() -> AsyncOpenAI:
-    global _openai_client
-    if _openai_client is None:
-        key = os.environ.get("OPENAI_API_KEY", "")
+def get_gemini() -> _genai.Client:
+    global _gemini_client
+    if _gemini_client is None:
+        key = os.environ.get("GEMINI_API_KEY", "")
         if not key:
             raise HTTPException(status_code=503, detail="AI service not configured")
-        _openai_client = AsyncOpenAI(api_key=key)
-    return _openai_client
+        _gemini_client = _genai.Client(api_key=key)
+    return _gemini_client
 
 _AI_SYSTEM_PROMPT = """You are the XYTEEE Nexus in-app support assistant — friendly, concise, and helpful.
 XYTEEE Nexus is a real-time social chat platform. Key features:
@@ -4021,22 +4022,31 @@ class AiChatResponse(BaseModel):
 @api.post("/ai/chat", response_model=AiChatResponse)
 async def ai_chat(body: AiChatRequest):
     """AI support chat — no auth required so unauthenticated users can also get help."""
-    client = get_openai()
-    # Keep last 20 messages to bound context cost
+    client = get_gemini()
     history = body.messages[-20:]
-    openai_messages = [{"role": "system", "content": _AI_SYSTEM_PROMPT}] + [
-        {"role": m.role, "content": m.content} for m in history
-    ]
+
+    # Build Gemini conversation history (all but last message)
+    gemini_history = []
+    for m in history[:-1]:
+        role = "user" if m.role == "user" else "model"
+        gemini_history.append(_genai_types.Content(role=role, parts=[_genai_types.Part(text=m.content)]))
+
+    last_msg = history[-1].content if history else ""
+
     try:
-        resp = await client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=openai_messages,
-            max_tokens=512,
-            temperature=0.7,
+        chat = client.chats.create(
+            model="gemini-2.0-flash",
+            config=_genai_types.GenerateContentConfig(
+                system_instruction=_AI_SYSTEM_PROMPT,
+                max_output_tokens=512,
+                temperature=0.7,
+            ),
+            history=gemini_history,
         )
-        reply = resp.choices[0].message.content or "Sorry, I couldn't generate a response."
+        resp = await asyncio.to_thread(chat.send_message, last_msg)
+        reply = resp.text or "Sorry, I couldn't generate a response."
     except Exception as exc:
-        logger.error("OpenAI error: %s", exc)
+        logger.error("Gemini error: %s", exc)
         raise HTTPException(status_code=502, detail="AI service temporarily unavailable")
     return {"reply": reply}
 
