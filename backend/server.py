@@ -2695,39 +2695,69 @@ async def open_chat(body: FriendActionIn, user=Depends(current_user)):
 
 @api.get("/chats")
 async def list_chats(user=Depends(current_user)):
-    blocked_ids = await blocked_user_ids(user["user_id"])
+    me = user["user_id"]
+    blocked_ids = await blocked_user_ids(me)
 
+    # 1. Fetch all conversations for this user in one query
     r = await run(lambda: sb.table("conversations").select("*")
-        .contains("participants", [user["user_id"]])
+        .contains("participants", [me])
         .order("last_message_at", desc=True).limit(200).execute())
-    out = []
+
+    # 2. Collect all unique other-user IDs and conversation IDs
+    conv_list = []
+    other_user_ids = []
+    seen_other: set = set()
     for c in r.data:
-        other_ids = [p for p in c["participants"] if p != user["user_id"]]
+        other_ids = [p for p in c["participants"] if p != me]
         if not other_ids:
             continue
         other = other_ids[0]
-
         if other in blocked_ids:
             continue
+        if other in seen_other:
+            continue  # keep only newest conv per user
+        seen_other.add(other)
+        conv_list.append(c)
+        other_user_ids.append(other)
 
-        ur = await run(lambda: sb.table("users").select("*").eq("user_id", other).execute())
-        other_user = public_user(ur.data[0]) if ur.data else None
-        # unread: messages in this conv not from me, not in my read_by
-        all_msgs = await run(lambda: sb.table("messages").select("message_id,sender_id,read_by,deleted_for")
-            .eq("conversation_id", c["conversation_id"])
-            .eq("deleted_for_everyone", False).execute())
-        unread = sum(
-            1 for m in all_msgs.data
-            if m["sender_id"] != user["user_id"]
-            and user["user_id"] not in (m.get("read_by") or [])
-            and user["user_id"] not in (m.get("deleted_for") or [])
-        )
+    if not conv_list:
+        return {"chats": []}
+
+    # 3. Batch-fetch all other users in one query
+    ur = await run(lambda: sb.table("users").select("*")
+        .in_("user_id", other_user_ids).execute())
+    umap = {u["user_id"]: public_user(u) for u in (ur.data or [])}
+
+    # 4. Batch-fetch unread messages for all conversations in one query
+    conv_ids = [c["conversation_id"] for c in conv_list]
+    msgs_r = await run(lambda: sb.table("messages")
+        .select("conversation_id,sender_id,read_by,deleted_for")
+        .in_("conversation_id", conv_ids)
+        .eq("deleted_for_everyone", False)
+        .execute())
+
+    # Count unread per conversation
+    unread_map: dict = {cid: 0 for cid in conv_ids}
+    for m in (msgs_r.data or []):
+        cid = m["conversation_id"]
+        if (
+            m["sender_id"] != me
+            and me not in (m.get("read_by") or [])
+            and me not in (m.get("deleted_for") or [])
+        ):
+            unread_map[cid] = unread_map.get(cid, 0) + 1
+
+    # 5. Build output
+    out = []
+    for c in conv_list:
+        other_ids = [p for p in c["participants"] if p != me]
+        other = other_ids[0]
+        other_user = umap.get(other)
+        if not other_user:
+            continue
         c["other_user"] = other_user
-        c["unread"] = unread
-
-        # Keep only the newest conversation for each user
-        if not any(x.get("other_user", {}).get("user_id") == other for x in out):
-            out.append(c)
+        c["unread"] = unread_map.get(c["conversation_id"], 0)
+        out.append(c)
 
     return {"chats": out}
 
