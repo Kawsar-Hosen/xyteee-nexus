@@ -1,14 +1,14 @@
 import React, { useCallback, useEffect, useState } from "react";
 import {
-  View, StyleSheet, ScrollView, TouchableOpacity, Image, Modal,
-  Pressable, Share, Linking, Alert,
+  View, StyleSheet, ScrollView, TouchableOpacity, Image,
+  Modal, Pressable, Share, Linking, Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import { Feather } from "@expo/vector-icons";
 import Animated, {
-  FadeIn, FadeInDown, FadeInRight,
+  FadeIn, FadeInDown, FadeInUp,
   useAnimatedStyle, useSharedValue,
   withRepeat, withSequence, withSpring, withTiming,
 } from "react-native-reanimated";
@@ -25,6 +25,8 @@ import { DOCK_PAD } from "@/src/theme/layout";
 
 const ADMIN_EMAIL = "smdkawsar2@gmail.com";
 const APP_VERSION = "1.0.0";
+const COVER_H = 230;
+const AVATAR_SIZE = 92;
 
 function getProfileCompletion(user: any) {
   const checks = [
@@ -35,8 +37,8 @@ function getProfileCompletion(user: any) {
     { key: "status_text", label: "Status" },
   ];
   const total = checks.length;
-  const done = checks.filter(c => !!user[c.key]).length;
-  const missing = checks.filter(c => !user[c.key]).map(c => c.label);
+  const done = checks.filter((c) => !!user[c.key]).length;
+  const missing = checks.filter((c) => !user[c.key]).map((c) => c.label);
   return { percent: Math.round((done / total) * 100), done, total, missing };
 }
 
@@ -74,16 +76,13 @@ export default function Profile() {
         api<{ feed: any[] }>("/stories/feed", { token }),
         api<{ friends: any[] }>("/friends", { token }),
       ]);
-
       const myStoryGroup = (storyResult.feed || []).find(
         (g: any) => g.user?.user_id === user.user_id
       );
       const myStories = myStoryGroup?.stories || [];
-
       setHasStory(myStories.length > 0);
       setReveriesCount(myStories.length);
       setBondsCount((friendsResult.friends || []).length);
-
       const imgs = myStories
         .filter((s: any) => s.media_url || s.image_url)
         .map((s: any) => s.media_url || s.image_url)
@@ -139,303 +138,378 @@ export default function Profile() {
     completionPct >= 80 ? "#23A55A" :
     completionPct >= 50 ? "#F0B232" : colors.primary;
 
+  const onlineStatusColor: Record<string, string> = {
+    online: "#23A55A", idle: "#F0B232", dnd: "#F23F43", invisible: "#80848E",
+  };
+  const currentStatusColor = onlineStatusColor[user.online_status || "online"];
+
   return (
     <SafeAreaView edges={["top"]} style={{ flex: 1, backgroundColor: colors.background }}>
-      <ScrollView contentContainerStyle={{ paddingBottom: DOCK_PAD }}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: DOCK_PAD + 16 }}>
 
-        {/* ── Cover ── */}
-        <View style={styles.coverWrap}>
+        {/* ═══════════════ COVER ═══════════════ */}
+        <View style={[styles.coverWrap, { height: COVER_H }]}>
           {user.cover_picture ? (
             <Image source={{ uri: user.cover_picture }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
           ) : (
-            <LinearGradient colors={[colors.primary, colors.primaryDeep]} style={StyleSheet.absoluteFillObject} />
+            <LinearGradient
+              colors={[colors.primaryDeep, colors.primary, `${colors.primary}55`]}
+              start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+              style={StyleSheet.absoluteFillObject}
+            />
           )}
+          {/* Multi-layer overlay */}
           <LinearGradient
-            colors={["transparent", "rgba(0,0,0,0.35)"]}
+            colors={["rgba(0,0,0,0.18)", "transparent", "rgba(0,0,0,0.55)"]}
             style={StyleSheet.absoluteFillObject}
           />
-          <View style={styles.headerRow}>
-            <TouchableOpacity onPress={toggle} style={[styles.iconBtn, { backgroundColor: colors.glass }]}>
-              <Feather name={mode === "dark" ? "sun" : "moon"} size={18} color="#fff" />
+          {/* Bottom fade into background */}
+          <LinearGradient
+            colors={["transparent", colors.background]}
+            start={{ x: 0, y: 0.6 }} end={{ x: 0, y: 1 }}
+            style={StyleSheet.absoluteFillObject}
+          />
+
+          {/* Header action buttons */}
+          <View style={styles.coverActions}>
+            <TouchableOpacity onPress={toggle} style={[styles.glassBtn, { backgroundColor: "rgba(0,0,0,0.32)" }]}>
+              <Feather name={mode === "dark" ? "sun" : "moon"} size={16} color="#fff" />
             </TouchableOpacity>
             <View style={{ flexDirection: "row", gap: 10 }}>
-              <TouchableOpacity onPress={handleShare} style={[styles.iconBtn, { backgroundColor: colors.glass }]}>
-                <Feather name="share-2" size={18} color="#fff" />
+              <TouchableOpacity onPress={handleShare} style={[styles.glassBtn, { backgroundColor: "rgba(0,0,0,0.32)" }]}>
+                <Feather name="share-2" size={16} color="#fff" />
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => router.push("/settings")} style={[styles.iconBtn, { backgroundColor: colors.glass }]}>
-                <Feather name="settings" size={18} color="#fff" />
+              <TouchableOpacity onPress={() => router.push("/settings")} style={[styles.glassBtn, { backgroundColor: "rgba(0,0,0,0.32)" }]}>
+                <Feather name="settings" size={16} color="#fff" />
               </TouchableOpacity>
             </View>
           </View>
         </View>
 
-        {/* ── Body ── */}
-        <View style={styles.body}>
+        {/* ═══════════════ AVATAR + IDENTITY ═══════════════ */}
+        <Animated.View entering={FadeInUp.duration(500).springify()} style={styles.identitySection}>
 
-          {/* Avatar + Status bubble */}
-          <View style={styles.profileTopRow}>
+          {/* Avatar centred, overlapping cover */}
+          <View style={styles.avatarRow}>
             <TouchableOpacity
-              activeOpacity={0.85}
+              activeOpacity={0.88}
               onPress={() => hasStory ? router.push(`/story/${user.user_id}`) : setOnlineSheetOpen(true)}
               onLongPress={() => setOnlineSheetOpen(true)}
               delayLongPress={400}
-              style={{ marginTop: -50, width: hasStory ? 108 : 100, height: hasStory ? 108 : 100, alignItems: "center", justifyContent: "center" }}
+              style={styles.avatarWrap}
             >
-              {hasStory ? (
-                <>
-                  <Animated.View
-                    pointerEvents="none"
-                    style={[{ position: "absolute", width: 108, height: 108, borderRadius: 54, overflow: "hidden" }, storyRingStyle]}
-                  >
-                    <LinearGradient
-                      colors={["#ff004c", "#ffea00", "#00ff85", "#00c8ff", "#7a00ff", "#ff00c8", "#ff004c"]}
-                      start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-                      style={StyleSheet.absoluteFillObject}
-                    />
-                  </Animated.View>
-                  <View style={{ padding: 2, borderRadius: 52, backgroundColor: colors.background }}>
-                    <Avatar uri={user.profile_picture} name={user.display_name} size={100} online onlineStatus={user.online_status || "online"} />
-                  </View>
-                </>
-              ) : (
-                <Avatar uri={user.profile_picture} name={user.display_name} size={100} online onlineStatus={user.online_status || "online"} />
+              {/* Rotating story ring */}
+              {hasStory && (
+                <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFillObject, storyRingStyle]}>
+                  <LinearGradient
+                    colors={["#ff004c", "#ffea00", "#00ff85", "#00c8ff", "#7a00ff", "#ff00c8", "#ff004c"]}
+                    start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+                    style={{ flex: 1, borderRadius: AVATAR_SIZE / 2 + 6 }}
+                  />
+                </Animated.View>
               )}
-            </TouchableOpacity>
-
-            <View style={styles.statusWrap}>
-              <View style={[styles.thoughtDotSmall, { backgroundColor: colors.surface }]} />
-              <View style={[styles.thoughtDotLarge, { backgroundColor: colors.surface }]} />
-              <TouchableOpacity
-                activeOpacity={0.8}
-                onPress={() => router.push("/settings/status")}
-                style={[styles.statusBubble, { backgroundColor: colors.surfaceHigh, borderColor: colors.border }]}
-              >
-                <View style={[styles.statusPlus, { backgroundColor: colors.mutedFg }]}>
-                  <Feather name="plus" size={12} color={colors.background} />
-                </View>
-                <AnimatedStatusText color={user.status_text ? colors.foreground : colors.mutedFg}>
-                  {user.status_text || "Set a status…"}
-                </AnimatedStatusText>
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          {/* Name + Edit */}
-          <View style={{ marginTop: spacing.md, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-            <View style={{ flex: 1 }}>
-              <View style={{ flexDirection: "row", alignItems: "center" }}>
-                <NxText variant="title" style={{ flexShrink: 1 }}>{user.display_name}</NxText>
-                <VerifiedBadge badgeType={user.badge_type} verifiedSince={user.verified_since} showInfo size={18} />
+              {/* Gold ring always present */}
+              {!hasStory && (
+                <View style={[styles.avatarGoldRing, { borderColor: colors.primary }]} />
+              )}
+              <View style={[styles.avatarInner, { backgroundColor: colors.background }]}>
+                <Avatar
+                  uri={user.profile_picture}
+                  name={user.display_name}
+                  size={AVATAR_SIZE}
+                  online
+                  onlineStatus={user.online_status || "online"}
+                />
               </View>
-              <NxText variant="bodySm" style={{ color: colors.mutedFg }}>@{user.username}</NxText>
-            </View>
-            <TouchableOpacity
-              onPress={() => router.push("/settings/edit-profile")}
-              style={[styles.editBtn, { borderColor: colors.primary }]}
-            >
-              <Feather name="edit-2" size={14} color={colors.primary} />
-              <NxText style={{ color: colors.primary, marginLeft: 6, fontFamily: fonts.bodySemi, fontSize: 13 }}>Edit</NxText>
+              {/* Edit overlay badge */}
+              <TouchableOpacity
+                onPress={() => router.push("/settings/edit-profile")}
+                style={[styles.avatarEditBadge, { backgroundColor: colors.primary, borderColor: colors.background }]}
+              >
+                <Feather name="camera" size={11} color={colors.onPrimary} />
+              </TouchableOpacity>
             </TouchableOpacity>
           </View>
 
-          {/* Bio */}
-          {user.bio ? (
-            <NxText variant="body" style={{ marginTop: spacing.sm, color: colors.foreground, lineHeight: 22 }}>
-              {user.bio}
+          {/* Name + badge */}
+          <View style={styles.nameRow}>
+            <NxText style={[styles.displayName, { color: colors.foreground }]}>{user.display_name}</NxText>
+            <VerifiedBadge badgeType={user.badge_type} verifiedSince={user.verified_since} showInfo size={18} />
+          </View>
+          <NxText style={[styles.username, { color: colors.mutedFg }]}>@{user.username}</NxText>
+
+          {/* Online status pill */}
+          <TouchableOpacity
+            onPress={() => setOnlineSheetOpen(true)}
+            activeOpacity={0.8}
+            style={[styles.statusPill, { backgroundColor: colors.surface, borderColor: colors.border }]}
+          >
+            <View style={[styles.statusDot, { backgroundColor: currentStatusColor }]} />
+            <NxText style={[styles.statusPillText, { color: colors.foreground }]}>
+              {user.online_status === "dnd" ? "Do Not Disturb"
+                : user.online_status === "invisible" ? "Invisible"
+                : user.online_status === "idle" ? "Idle"
+                : "Online"}
             </NxText>
-          ) : (
-            <TouchableOpacity onPress={() => router.push("/settings/edit-profile")} activeOpacity={0.7}>
-              <NxText variant="bodySm" style={{ marginTop: spacing.sm, fontStyle: "italic", color: colors.mutedFg }}>
-                + Add a bio
-              </NxText>
-            </TouchableOpacity>
-          )}
+            <Feather name="chevron-down" size={13} color={colors.mutedFg} />
+          </TouchableOpacity>
+        </Animated.View>
 
-          {/* Website / Link */}
-          {user.website ? (
+        {/* ═══════════════ STATS ═══════════════ */}
+        <Animated.View entering={FadeIn.delay(80).duration(500)} style={[styles.statsCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <StatCol value={String(bondsCount)} label="Bonds" accent={colors.primary} />
+          <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
+          <StatCol value={String(reveriesCount)} label="Reveries" accent="#a78bfa" />
+          <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
+          <StatCol value={sinceValue} label="Since" accent={colors.mutedFg} />
+        </Animated.View>
+
+        {/* ═══════════════ ACTION PILLS ═══════════════ */}
+        <Animated.View entering={FadeInDown.delay(100).duration(450)} style={styles.actionRow}>
+          <ActionPill
+            icon="edit-2" label="Edit Profile"
+            onPress={() => router.push("/settings/edit-profile")}
+            primary colors={colors}
+          />
+          <ActionPill
+            icon="bell" label="Alerts"
+            onPress={() => router.push("/notifications")}
+            colors={colors}
+          />
+          <ActionPill
+            icon="share-2" label="Share"
+            onPress={handleShare}
+            colors={colors}
+          />
+          {user.email === ADMIN_EMAIL && (
+            <ActionPill
+              icon="shield" label="Admin"
+              onPress={() => router.push("/admin")}
+              colors={colors}
+            />
+          )}
+        </Animated.View>
+
+        <View style={[styles.bodyPad]}>
+
+          {/* ═══════════════ BIO / DETAILS ═══════════════ */}
+          <Animated.View entering={FadeInDown.delay(120).duration(450)} style={[styles.bioCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            {user.bio ? (
+              <NxText style={[styles.bioText, { color: colors.foreground }]}>{user.bio}</NxText>
+            ) : (
+              <TouchableOpacity onPress={() => router.push("/settings/edit-profile")} activeOpacity={0.7}>
+                <NxText style={[styles.bioPlaceholder, { color: colors.mutedFg }]}>
+                  + Add a bio to tell people about yourself
+                </NxText>
+              </TouchableOpacity>
+            )}
+
+            {/* Status thought bubble */}
             <TouchableOpacity
-              onPress={() => Linking.openURL(user.website.startsWith("http") ? user.website : `https://${user.website}`)}
-              style={{ marginTop: 8, flexDirection: "row", alignItems: "center" }}
+              activeOpacity={0.8}
+              onPress={() => router.push("/settings/status")}
+              style={[styles.statusBubbleRow, { borderColor: colors.border }]}
             >
-              <Feather name="link" size={13} color={colors.primary} />
-              <NxText style={{ marginLeft: 6, color: colors.primary, fontFamily: fonts.bodySemi, fontSize: 13 }}>
-                {user.website.replace(/^https?:\/\//, "")}
-              </NxText>
+              <View style={[styles.statusBubbleIcon, { backgroundColor: `${colors.primary}22` }]}>
+                <Feather name="message-circle" size={13} color={colors.primary} />
+              </View>
+              <AnimatedStatusText color={user.status_text ? colors.foreground : colors.mutedFg} style={{ flex: 1, fontSize: 13, fontFamily: fonts.body }}>
+                {user.status_text || "Set a status…"}
+              </AnimatedStatusText>
+              <Feather name="edit-2" size={12} color={colors.mutedFg} />
             </TouchableOpacity>
-          ) : null}
 
-          {/* Birthday */}
-          {user.birthday ? (
-            <Animated.View entering={FadeInDown.duration(650).springify()} style={{ marginTop: 8, flexDirection: "row", alignItems: "center" }}>
-              <BirthdayGift color={colors.primary} />
-              <NxText variant="bodySm" style={{ marginLeft: 8, color: colors.mutedFg, fontFamily: fonts.bodyMedium }}>
-                {new Date(`${user.birthday}T00:00:00`).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })}
-              </NxText>
-            </Animated.View>
-          ) : null}
-
-          {/* Joined date */}
-          {joinedDate && (
-            <View style={{ marginTop: 6, flexDirection: "row", alignItems: "center" }}>
-              <Feather name="calendar" size={13} color={colors.mutedFg} />
-              <NxText variant="bodySm" style={{ marginLeft: 6, color: colors.mutedFg }}>Joined {joinedDate}</NxText>
+            {/* Meta row */}
+            <View style={styles.metaRow}>
+              {user.website ? (
+                <TouchableOpacity
+                  onPress={() => Linking.openURL(user.website.startsWith("http") ? user.website : `https://${user.website}`)}
+                  style={styles.metaItem}
+                >
+                  <Feather name="link" size={13} color={colors.primary} />
+                  <NxText style={[styles.metaText, { color: colors.primary }]}>
+                    {user.website.replace(/^https?:\/\//, "")}
+                  </NxText>
+                </TouchableOpacity>
+              ) : null}
+              {user.birthday ? (
+                <View style={styles.metaItem}>
+                  <BirthdayGift color={colors.primary} />
+                  <NxText style={[styles.metaText, { color: colors.mutedFg }]}>
+                    {new Date(`${user.birthday}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                  </NxText>
+                </View>
+              ) : null}
+              {joinedDate && (
+                <View style={styles.metaItem}>
+                  <Feather name="calendar" size={13} color={colors.mutedFg} />
+                  <NxText style={[styles.metaText, { color: colors.mutedFg }]}>Joined {joinedDate}</NxText>
+                </View>
+              )}
             </View>
-          )}
-
-          {/* ── Stats ── */}
-          <Animated.View entering={FadeIn.delay(100).duration(500)} style={[styles.statsRow, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <StatItem icon="users" label="Bonds" value={String(bondsCount)} color={colors.primary} />
-            <View style={{ width: 1, height: 36, backgroundColor: colors.border }} />
-            <StatItem icon="image" label="Reveries" value={String(reveriesCount)} color="#7a00ff" />
-            <View style={{ width: 1, height: 36, backgroundColor: colors.border }} />
-            <StatItem icon="clock" label="Since" value={sinceValue} color={colors.mutedFg} />
           </Animated.View>
 
-          {/* ── Profile Completion Card ── */}
+          {/* ═══════════════ PROFILE COMPLETION ═══════════════ */}
           {completionPct < 100 && (
-            <Animated.View entering={FadeInDown.delay(150).duration(500)} style={[styles.completionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-                <View>
-                  <NxText style={{ fontFamily: fonts.bodySemi, fontSize: 14, color: colors.foreground }}>
-                    Profile {completionPct}% complete
-                  </NxText>
+            <Animated.View entering={FadeInDown.delay(150).duration(450)} style={[styles.completionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <View style={styles.completionTop}>
+                <View style={{ flex: 1 }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                    <View style={[styles.completionDot, { backgroundColor: completionColor }]} />
+                    <NxText style={[styles.completionTitle, { color: colors.foreground }]}>
+                      Profile {completionPct}% complete
+                    </NxText>
+                  </View>
                   {missingFields.length > 0 && (
-                    <NxText style={{ fontSize: 12, color: colors.mutedFg, marginTop: 2 }}>
-                      Missing: {missingFields.join(", ")}
+                    <NxText style={[styles.completionSub, { color: colors.mutedFg }]}>
+                      Missing: {missingFields.join(" · ")}
                     </NxText>
                   )}
                 </View>
                 <TouchableOpacity
                   onPress={() => router.push("/settings/edit-profile")}
-                  style={[styles.completionBtn, { backgroundColor: colors.primary }]}
+                  style={[styles.completionBtn, { backgroundColor: completionColor }]}
                 >
-                  <NxText style={{ color: colors.onPrimary, fontSize: 12, fontFamily: fonts.bodySemi }}>
+                  <NxText style={{ color: "#fff", fontSize: 12, fontFamily: fonts.bodySemi }}>
                     Complete
                   </NxText>
                 </TouchableOpacity>
               </View>
               <View style={[styles.progressTrack, { backgroundColor: colors.surfaceHigh }]}>
-                <Animated.View
-                  style={[styles.progressFill, completionBarStyle, { backgroundColor: completionColor }]}
-                />
+                <Animated.View style={[styles.progressFill, completionBarStyle, { backgroundColor: completionColor }]} />
               </View>
             </Animated.View>
           )}
 
-          {/* ── Story Gallery Strip ── */}
+          {/* ═══════════════ STORY GALLERY ═══════════════ */}
           {storyImages.length > 0 && (
-            <Animated.View entering={FadeIn.delay(200).duration(500)}>
-              <View style={styles.sectionHeader}>
-                <Feather name="image" size={15} color={colors.mutedFg} />
-                <NxText style={styles.sectionLabel}>My Reveries</NxText>
-                <TouchableOpacity onPress={() => router.push(`/story/${user.user_id}`)} style={{ marginLeft: "auto" }}>
+            <Animated.View entering={FadeIn.delay(180).duration(450)}>
+              <SectionLabel icon="image" label="My Reveries" colors={colors}>
+                <TouchableOpacity onPress={() => router.push(`/story/${user.user_id}`)}>
                   <NxText style={{ fontSize: 12, color: colors.primary, fontFamily: fonts.bodySemi }}>View all</NxText>
                 </TouchableOpacity>
-              </View>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -spacing.lg, paddingHorizontal: spacing.lg }}>
-                {storyImages.map((uri, i) => (
-                  <TouchableOpacity
-                    key={i}
-                    onPress={() => router.push(`/story/${user.user_id}`)}
-                    style={[styles.galleryThumb, { borderColor: colors.border, marginRight: 8 }]}
-                    activeOpacity={0.85}
-                  >
-                    <Image source={{ uri }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
-                  </TouchableOpacity>
-                ))}
+              </SectionLabel>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -spacing.lg }}>
+                <View style={{ paddingHorizontal: spacing.lg, flexDirection: "row", gap: 10 }}>
+                  {storyImages.map((uri, i) => (
+                    <TouchableOpacity
+                      key={i}
+                      onPress={() => router.push(`/story/${user.user_id}`)}
+                      style={[styles.galleryThumb, { borderColor: colors.border }]}
+                      activeOpacity={0.85}
+                    >
+                      <Image source={{ uri }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
+                      <LinearGradient
+                        colors={["transparent", "rgba(0,0,0,0.4)"]}
+                        style={StyleSheet.absoluteFillObject}
+                      />
+                    </TouchableOpacity>
+                  ))}
+                </View>
               </ScrollView>
             </Animated.View>
           )}
 
-          {/* ── Quick Links ── */}
-          <View style={{ marginTop: spacing.xl }}>
+          {/* ═══════════════ MENU GROUPS ═══════════════ */}
+          <Animated.View entering={FadeInDown.delay(200).duration(450)}>
 
-            {/* Social */}
-            <SectionHeader icon="heart" label="Social" colors={colors} />
-            <QuickLink icon="bell" label="Notifications" onPress={() => router.push("/notifications")} colors={colors} />
-            <QuickLink icon="users" label="My Bonds" badge={bondsCount > 0 ? String(bondsCount) : undefined} onPress={() => router.push("/(app)/friends")} colors={colors} />
+            {/* Social group */}
+            <SectionLabel icon="heart" label="Social" colors={colors} />
+            <MenuCard colors={colors}>
+              <MenuItem icon="bell" label="Notifications" onPress={() => router.push("/notifications")} colors={colors} />
+              <MenuItem icon="users" label="My Bonds" badge={bondsCount > 0 ? String(bondsCount) : undefined} onPress={() => router.push("/(app)/friends")} colors={colors} last />
+            </MenuCard>
 
-            {/* Account */}
-            <SectionHeader icon="user" label="Account" colors={colors} />
-            <QuickLink icon="lock" label="Change Password" onPress={() => router.push("/settings/change-password")} colors={colors} />
-            <QuickLink icon="slash" label="Blocked Users" onPress={() => router.push("/settings/blocked")} colors={colors} />
-            <QuickLink icon="user-x" label="Delete Account" tint={colors.danger} onPress={() => router.push("/settings/delete-account")} colors={colors} />
+            {/* Account group */}
+            <SectionLabel icon="user" label="Account" colors={colors} />
+            <MenuCard colors={colors}>
+              <MenuItem icon="lock" label="Change Password" onPress={() => router.push("/settings/change-password")} colors={colors} />
+              <MenuItem icon="slash" label="Blocked Users" onPress={() => router.push("/settings/blocked")} colors={colors} />
+              <MenuItem icon="user-x" label="Delete Account" tint={colors.danger} onPress={() => router.push("/settings/delete-account")} colors={colors} last />
+            </MenuCard>
 
-            {/* App */}
-            <SectionHeader icon="grid" label="App" colors={colors} />
-            <QuickLink
-              icon={mode === "dark" ? "sun" : "moon"}
-              label={mode === "dark" ? "Switch to Light Mode" : "Switch to Dark Mode"}
-              onPress={toggle}
-              colors={colors}
-            />
-            <QuickLink icon="file-text" label="Privacy Policy" onPress={() => router.push("/settings/privacy-policy")} colors={colors} />
-            <QuickLink icon="share-2" label="Share My Profile" onPress={handleShare} colors={colors} />
+            {/* App group */}
+            <SectionLabel icon="grid" label="App" colors={colors} />
+            <MenuCard colors={colors}>
+              <MenuItem
+                icon={mode === "dark" ? "sun" : "moon"}
+                label={mode === "dark" ? "Switch to Light Mode" : "Switch to Dark Mode"}
+                onPress={toggle}
+                colors={colors}
+              />
+              <MenuItem icon="file-text" label="Privacy Policy" onPress={() => router.push("/settings/privacy-policy")} colors={colors} last />
+            </MenuCard>
 
-            {/* Admin */}
-            {user.email === ADMIN_EMAIL && (
-              <QuickLink icon="shield" label="Admin Panel" tint={colors.primary} onPress={() => router.push("/admin")} colors={colors} />
-            )}
-
-            {/* Sign Out */}
+            {/* Sign out */}
             <View style={{ height: spacing.md }} />
-            <QuickLink
-              icon="log-out"
-              label="Sign out"
-              tint={colors.danger}
-              onPress={async () => {
-                Alert.alert("Sign out", "Are you sure you want to sign out?", [
-                  { text: "Cancel", style: "cancel" },
-                  { text: "Sign out", style: "destructive", onPress: async () => { await logout(); router.replace("/"); } },
-                ]);
-              }}
-              colors={colors}
-            />
-          </View>
+            <MenuCard colors={colors}>
+              <MenuItem
+                icon="log-out"
+                label="Sign out"
+                tint={colors.danger}
+                last
+                onPress={async () => {
+                  Alert.alert("Sign out", "Are you sure you want to sign out?", [
+                    { text: "Cancel", style: "cancel" },
+                    { text: "Sign out", style: "destructive", onPress: async () => { await logout(); router.replace("/"); } },
+                  ]);
+                }}
+                colors={colors}
+              />
+            </MenuCard>
+          </Animated.View>
 
           {/* App Version */}
-          <View style={{ alignItems: "center", marginTop: spacing.xl, marginBottom: spacing.md }}>
-            <NxText style={{ color: colors.mutedFg, fontSize: 11 }}>Xyteee v{APP_VERSION}</NxText>
+          <View style={{ alignItems: "center", marginTop: spacing.xl }}>
+            <NxText style={{ color: colors.mutedFg, fontSize: 11, letterSpacing: 0.5 }}>
+              XYTEEE NEXUS  ·  v{APP_VERSION}
+            </NxText>
           </View>
+
         </View>
       </ScrollView>
 
-      {/* Online Status Modal */}
+      {/* ═══════════════ ONLINE STATUS SHEET ═══════════════ */}
       <Modal visible={onlineSheetOpen} transparent animationType="fade" onRequestClose={() => setOnlineSheetOpen(false)}>
-        <Pressable style={styles.onlineSheetOverlay} onPress={() => setOnlineSheetOpen(false)}>
-          <Pressable onPress={e => e.stopPropagation()} style={[styles.onlineSheet, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <View style={[styles.onlineSheetHandle, { backgroundColor: colors.mutedFg }]} />
-            <NxText style={[styles.onlineSheetTitle, { color: colors.foreground }]}>Online Status</NxText>
-            {[
-              { key: "online", label: "Online", description: "You're active and available", color: "#23A55A" },
-              { key: "idle", label: "Idle", description: "You may be away for a while", color: "#F0B232" },
-              { key: "dnd", label: "Do Not Disturb", description: "Notifications are silenced", color: "#F23F43" },
-              { key: "invisible", label: "Invisible", description: "Appear offline to everyone", color: "#80848E" },
-            ].map(option => {
-              const selected = (user.online_status || "online") === option.key;
+        <Pressable style={styles.sheetOverlay} onPress={() => setOnlineSheetOpen(false)}>
+          <Pressable onPress={(e) => e.stopPropagation()}
+            style={[styles.sheet, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <View style={[styles.sheetHandle, { backgroundColor: colors.mutedFg }]} />
+            <NxText style={[styles.sheetTitle, { color: colors.foreground }]}>Online Status</NxText>
+            {([
+              { key: "online",    label: "Online",         desc: "Active and available",       color: "#23A55A" },
+              { key: "idle",      label: "Idle",           desc: "Away for a while",            color: "#F0B232" },
+              { key: "dnd",       label: "Do Not Disturb", desc: "Notifications silenced",      color: "#F23F43" },
+              { key: "invisible", label: "Invisible",      desc: "Appear offline to everyone",  color: "#80848E" },
+            ] as const).map((opt) => {
+              const selected = (user.online_status || "online") === opt.key;
               return (
                 <TouchableOpacity
-                  key={option.key}
+                  key={opt.key}
                   activeOpacity={0.75}
                   disabled={onlineStatusBusy}
                   onPress={async () => {
                     setOnlineStatusBusy(true);
                     try {
-                      await updateUser({ online_status: option.key as any });
+                      await updateUser({ online_status: opt.key as any });
                       setOnlineSheetOpen(false);
                     } finally { setOnlineStatusBusy(false); }
                   }}
-                  style={[styles.onlineSheetOption, { borderBottomColor: colors.border }]}
+                  style={[styles.sheetOption, { borderBottomColor: colors.border }]}
                 >
-                  <View style={[styles.onlineStatusIcon, { backgroundColor: option.color }]}>
-                    {option.key === "dnd" ? <View style={styles.dndMinus} /> :
-                     option.key === "invisible" ? <View style={[styles.invisibleCenter, { backgroundColor: colors.surface }]} /> : null}
+                  <View style={[styles.sheetStatusDot, { backgroundColor: opt.color }]}>
+                    {opt.key === "dnd" ? <View style={styles.dndBar} /> :
+                     opt.key === "invisible" ? <View style={[styles.invisibleInner, { backgroundColor: colors.surface }]} /> : null}
                   </View>
-                  <View style={styles.onlineOptionText}>
-                    <NxText style={[styles.onlineOptionLabel, { color: colors.foreground }]}>{option.label}</NxText>
-                    <NxText style={[styles.onlineOptionDescription, { color: colors.mutedFg }]}>{option.description}</NxText>
+                  <View style={{ flex: 1, marginLeft: 14 }}>
+                    <NxText style={[styles.sheetOptLabel, { color: colors.foreground }]}>{opt.label}</NxText>
+                    <NxText style={[styles.sheetOptDesc, { color: colors.mutedFg }]}>{opt.desc}</NxText>
                   </View>
-                  {selected ? <Feather name="check" size={21} color={colors.primary} /> : <View style={{ width: 21 }} />}
+                  {selected
+                    ? <View style={[styles.sheetCheck, { backgroundColor: colors.primary }]}>
+                        <Feather name="check" size={13} color={colors.onPrimary} />
+                      </View>
+                    : <View style={styles.sheetCheck} />}
                 </TouchableOpacity>
               );
             })}
@@ -446,44 +520,72 @@ export default function Profile() {
   );
 }
 
-/* ── Sub-components ── */
+/* ─── Sub-components ──────────────────────────────────────────────────────── */
 
-function SectionHeader({ icon, label, colors }: { icon: string; label: string; colors: any }) {
+function StatCol({ value, label, accent }: { value: string; label: string; accent: string }) {
   return (
-    <View style={{ flexDirection: "row", alignItems: "center", marginTop: spacing.lg, marginBottom: 8 }}>
-      <Feather name={icon as any} size={13} color={colors.mutedFg} />
-      <NxText style={{ marginLeft: 6, fontSize: 11, fontFamily: fonts.bodySemi, color: colors.mutedFg, letterSpacing: 0.8, textTransform: "uppercase" }}>
+    <View style={styles.statCol}>
+      <NxText style={[styles.statValue, { color: accent }]}>{value}</NxText>
+      <NxText style={styles.statLabel}>{label}</NxText>
+    </View>
+  );
+}
+
+function ActionPill({ icon, label, onPress, primary, colors }: any) {
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.8}
+      style={[
+        styles.actionPill,
+        primary
+          ? { backgroundColor: colors.primary, borderColor: colors.primary }
+          : { backgroundColor: colors.surface, borderColor: colors.border },
+      ]}
+    >
+      <Feather name={icon} size={15} color={primary ? colors.onPrimary : colors.foreground} />
+      <NxText style={[styles.actionPillLabel, { color: primary ? colors.onPrimary : colors.foreground }]}>
         {label}
       </NxText>
+    </TouchableOpacity>
+  );
+}
+
+function SectionLabel({ icon, label, colors, children }: any) {
+  return (
+    <View style={styles.sectionLabelRow}>
+      <View style={[styles.sectionDot, { backgroundColor: colors.primary }]} />
+      <NxText style={[styles.sectionLabelText, { color: colors.mutedFg }]}>{label.toUpperCase()}</NxText>
+      {children && <View style={{ marginLeft: "auto" }}>{children}</View>}
     </View>
   );
 }
 
-function StatItem({ icon, label, value, color }: { icon: string; label: string; value: string; color: string }) {
+function MenuCard({ children, colors }: { children: React.ReactNode; colors: any }) {
   return (
-    <View style={{ flex: 1, alignItems: "center" }}>
-      <Feather name={icon as any} size={16} color={color} style={{ marginBottom: 4 }} />
-      <NxText variant="titleSm">{value}</NxText>
-      <NxText variant="caption" style={{ marginTop: 1 }}>{label}</NxText>
+    <View style={[styles.menuCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+      {children}
     </View>
   );
 }
 
-function QuickLink({ icon, label, onPress, tint, badge, colors }: any) {
+function MenuItem({ icon, label, onPress, tint, badge, last, colors }: any) {
   return (
-    <TouchableOpacity onPress={onPress} activeOpacity={0.8} style={[styles.link, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-      <View style={[styles.linkIcon, { backgroundColor: colors.surfaceHigh }]}>
-        <Feather name={icon} size={16} color={tint || colors.foreground} />
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.75}
+      style={[styles.menuItem, !last && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border }]}
+    >
+      <View style={[styles.menuIconWrap, { backgroundColor: tint ? `${tint}18` : colors.surfaceHigh }]}>
+        <Feather name={icon} size={15} color={tint || colors.foreground} />
       </View>
-      <NxText style={{ marginLeft: 14, fontFamily: fonts.bodyMedium, color: tint || colors.foreground, fontSize: 14, flex: 1 }}>
-        {label}
-      </NxText>
+      <NxText style={[styles.menuLabel, { color: tint || colors.foreground }]}>{label}</NxText>
       {badge ? (
-        <View style={[styles.badge, { backgroundColor: colors.primary }]}>
+        <View style={[styles.menuBadge, { backgroundColor: colors.primary }]}>
           <NxText style={{ color: "#fff", fontSize: 11, fontFamily: fonts.bodySemi }}>{badge}</NxText>
         </View>
       ) : null}
-      <Feather name="chevron-right" size={18} color={colors.mutedFg} />
+      <Feather name="chevron-right" size={16} color={colors.mutedFg} style={{ opacity: 0.5 }} />
     </TouchableOpacity>
   );
 }
@@ -491,48 +593,248 @@ function QuickLink({ icon, label, onPress, tint, badge, colors }: any) {
 function BirthdayGift({ color }: { color: string }) {
   const scale = useSharedValue(1);
   useEffect(() => {
-    scale.value = withRepeat(withSequence(withTiming(1.18, { duration: 700 }), withTiming(1, { duration: 700 })), -1, true);
+    scale.value = withRepeat(withSequence(withTiming(1.2, { duration: 700 }), withTiming(1, { duration: 700 })), -1, true);
   }, []);
   return (
     <Animated.View style={useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }))}>
-      <Feather name="gift" size={16} color={color} />
+      <Feather name="gift" size={13} color={color} />
     </Animated.View>
   );
 }
 
-/* ── Styles ── */
+/* ─── Styles ──────────────────────────────────────────────────────────────── */
 const styles = StyleSheet.create({
-  coverWrap: { height: 200, position: "relative" },
-  headerRow: { position: "absolute", top: spacing.md, left: spacing.lg, right: spacing.lg, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  iconBtn: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
-  body: { paddingHorizontal: spacing.lg },
-  profileTopRow: { height: 86, flexDirection: "row", alignItems: "flex-start" },
-  editBtn: { flexDirection: "row", alignItems: "center", paddingHorizontal: 14, paddingVertical: 8, borderRadius: radii.pill, borderWidth: 1 },
-  statusWrap: { flex: 1, minWidth: 0, height: 78, marginLeft: 10, marginRight: 10, marginTop: -32, position: "relative", justifyContent: "flex-end" },
-  statusBubble: { flexDirection: "row", alignItems: "center", alignSelf: "flex-start", width: "92%", minHeight: 58, maxHeight: 78, borderWidth: 1, borderRadius: 18, paddingHorizontal: 13, paddingVertical: 10, overflow: "hidden" },
-  thoughtDotSmall: { position: "absolute", left: -10, top: 7, width: 7, height: 7, borderRadius: 999, zIndex: 3 },
-  thoughtDotLarge: { position: "absolute", left: 3, top: 16, width: 11, height: 11, borderRadius: 999, zIndex: 3 },
-  statusPlus: { width: 20, height: 20, borderRadius: 10, alignItems: "center", justifyContent: "center", marginRight: 8, flexShrink: 0 },
-  statsRow: { flexDirection: "row", alignItems: "center", padding: spacing.lg, borderRadius: radii.lg, borderWidth: 1, marginTop: spacing.lg },
-  completionCard: { marginTop: spacing.md, borderRadius: radii.lg, borderWidth: 1, padding: spacing.md },
-  completionBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: radii.pill },
-  progressTrack: { height: 6, borderRadius: 3, overflow: "hidden" },
-  progressFill: { height: 6, borderRadius: 3 },
-  sectionHeader: { flexDirection: "row", alignItems: "center", marginTop: spacing.lg, marginBottom: 10 },
-  sectionLabel: { fontSize: 13, fontFamily: fonts.bodySemi, color: "#888", marginLeft: 6 },
-  galleryThumb: { width: 100, height: 130, borderRadius: radii.md, overflow: "hidden", borderWidth: 1, backgroundColor: "#111" },
-  link: { flexDirection: "row", alignItems: "center", padding: spacing.md, borderRadius: radii.md, borderWidth: 1, marginBottom: spacing.sm },
-  linkIcon: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
-  badge: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 10, marginRight: 8 },
-  onlineSheetOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "flex-end" },
-  onlineSheet: { borderWidth: 1, borderTopLeftRadius: 26, borderTopRightRadius: 26, paddingHorizontal: spacing.lg, paddingTop: 10, paddingBottom: 28 },
-  onlineSheetHandle: { width: 38, height: 4, borderRadius: 2, alignSelf: "center", opacity: 0.45, marginBottom: 18 },
-  onlineSheetTitle: { fontFamily: fonts.bodySemi, fontSize: 19, marginBottom: 8 },
-  onlineSheetOption: { minHeight: 72, flexDirection: "row", alignItems: "center", borderBottomWidth: StyleSheet.hairlineWidth },
-  onlineStatusIcon: { width: 20, height: 20, borderRadius: 10, alignItems: "center", justifyContent: "center" },
-  dndMinus: { width: 10, height: 3, borderRadius: 2, backgroundColor: "#FFFFFF" },
-  invisibleCenter: { width: 9, height: 9, borderRadius: 5 },
-  onlineOptionText: { flex: 1, marginLeft: 14, marginRight: 12 },
-  onlineOptionLabel: { fontFamily: fonts.bodySemi, fontSize: 15 },
-  onlineOptionDescription: { fontFamily: fonts.body, fontSize: 12, lineHeight: 17, marginTop: 2 },
+  // Cover
+  coverWrap: { position: "relative", overflow: "hidden" },
+  coverActions: {
+    position: "absolute",
+    top: spacing.md,
+    left: spacing.lg,
+    right: spacing.lg,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  glassBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
+    backdropFilter: "blur(12px)" as any,
+  },
+
+  // Identity
+  identitySection: { alignItems: "center", marginTop: -AVATAR_SIZE / 2 - 4, paddingBottom: spacing.md },
+  avatarRow: { marginBottom: spacing.sm },
+  avatarWrap: {
+    width: AVATAR_SIZE + 16,
+    height: AVATAR_SIZE + 16,
+    borderRadius: (AVATAR_SIZE + 16) / 2,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  avatarGoldRing: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: (AVATAR_SIZE + 16) / 2,
+    borderWidth: 2.5,
+  },
+  avatarInner: {
+    padding: 3,
+    borderRadius: AVATAR_SIZE / 2 + 3,
+  },
+  avatarEditBadge: {
+    position: "absolute",
+    bottom: 4,
+    right: 4,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+  },
+  nameRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 4,
+  },
+  displayName: {
+    fontFamily: fonts.bodySemi,
+    fontSize: 22,
+    letterSpacing: 0.2,
+  },
+  username: {
+    fontFamily: fonts.body,
+    fontSize: 14,
+    marginTop: 2,
+  },
+  statusPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: radii.pill,
+    borderWidth: 1,
+  },
+  statusDot: { width: 8, height: 8, borderRadius: 4 },
+  statusPillText: { fontFamily: fonts.bodyMedium, fontSize: 13 },
+
+  // Stats
+  statsCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.md,
+    borderRadius: radii.xl,
+    borderWidth: 1,
+    paddingVertical: spacing.lg,
+  },
+  statCol: { flex: 1, alignItems: "center" },
+  statValue: { fontFamily: fonts.bodySemi, fontSize: 22, letterSpacing: 0.5 },
+  statLabel: { fontFamily: fonts.body, fontSize: 12, color: "#888", marginTop: 3 },
+  statDivider: { width: 1, height: 38 },
+
+  // Action pills
+  actionRow: {
+    flexDirection: "row",
+    gap: 10,
+    paddingHorizontal: spacing.lg,
+    marginTop: spacing.md,
+    flexWrap: "wrap",
+  },
+  actionPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: radii.pill,
+    borderWidth: 1,
+  },
+  actionPillLabel: { fontFamily: fonts.bodySemi, fontSize: 13 },
+
+  // Body pad
+  bodyPad: { paddingHorizontal: spacing.lg, marginTop: spacing.md },
+
+  // Bio card
+  bioCard: {
+    borderRadius: radii.xl,
+    borderWidth: 1,
+    padding: spacing.md,
+    gap: 12,
+  },
+  bioText: { fontFamily: fonts.body, fontSize: 14, lineHeight: 22 },
+  bioPlaceholder: { fontFamily: fonts.body, fontSize: 14, fontStyle: "italic" },
+  statusBubbleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  statusBubbleIcon: { width: 28, height: 28, borderRadius: 14, alignItems: "center", justifyContent: "center" },
+  metaRow: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
+  metaItem: { flexDirection: "row", alignItems: "center", gap: 5 },
+  metaText: { fontFamily: fonts.body, fontSize: 13 },
+
+  // Profile completion
+  completionCard: {
+    marginTop: spacing.md,
+    borderRadius: radii.xl,
+    borderWidth: 1,
+    padding: spacing.md,
+  },
+  completionTop: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 12 },
+  completionDot: { width: 8, height: 8, borderRadius: 4 },
+  completionTitle: { fontFamily: fonts.bodySemi, fontSize: 14 },
+  completionSub: { fontFamily: fonts.body, fontSize: 12, marginTop: 2 },
+  completionBtn: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: radii.pill },
+  progressTrack: { height: 5, borderRadius: 3, overflow: "hidden" },
+  progressFill: { height: 5, borderRadius: 3 },
+
+  // Gallery
+  galleryThumb: {
+    width: 96,
+    height: 128,
+    borderRadius: radii.lg,
+    overflow: "hidden",
+    borderWidth: 1,
+    backgroundColor: "#111",
+  },
+
+  // Section label
+  sectionLabelRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    marginTop: spacing.xl,
+    marginBottom: 10,
+  },
+  sectionDot: { width: 6, height: 6, borderRadius: 3 },
+  sectionLabelText: {
+    fontSize: 11,
+    fontFamily: fonts.bodySemi,
+    letterSpacing: 1.2,
+  },
+
+  // Menu card
+  menuCard: {
+    borderRadius: radii.xl,
+    borderWidth: 1,
+    overflow: "hidden",
+  },
+  menuItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: spacing.md,
+    paddingVertical: 14,
+  },
+  menuIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  menuLabel: {
+    flex: 1,
+    marginLeft: 12,
+    fontFamily: fonts.bodyMedium,
+    fontSize: 14,
+  },
+  menuBadge: {
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 10,
+    marginRight: 8,
+  },
+
+  // Online status sheet
+  sheetOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "flex-end" },
+  sheet: {
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    borderWidth: 1,
+    paddingHorizontal: spacing.lg,
+    paddingTop: 10,
+    paddingBottom: 32,
+  },
+  sheetHandle: { width: 38, height: 4, borderRadius: 2, alignSelf: "center", opacity: 0.4, marginBottom: 18 },
+  sheetTitle: { fontFamily: fonts.bodySemi, fontSize: 19, marginBottom: 8 },
+  sheetOption: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 16,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  sheetStatusDot: { width: 20, height: 20, borderRadius: 10, alignItems: "center", justifyContent: "center" },
+  dndBar: { width: 10, height: 3, borderRadius: 2, backgroundColor: "#fff" },
+  invisibleInner: { width: 9, height: 9, borderRadius: 5 },
+  sheetOptLabel: { fontFamily: fonts.bodySemi, fontSize: 15 },
+  sheetOptDesc: { fontFamily: fonts.body, fontSize: 12, marginTop: 2 },
+  sheetCheck: { width: 26, height: 26, borderRadius: 13, alignItems: "center", justifyContent: "center" },
 });
