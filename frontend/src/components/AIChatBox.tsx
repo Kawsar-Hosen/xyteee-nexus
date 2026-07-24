@@ -109,7 +109,8 @@ export function AIChatBox() {
 
   const DOCK_HEIGHT = 72 + Math.max(insets.bottom, 8);
   const PANEL_BOTTOM = DOCK_HEIGHT + 10;
-  const PANEL_HEIGHT = screenHeight - (insets.top + 16) - PANEL_BOTTOM;
+  // Panel takes ~62% of screen height — compact but readable
+  const PANEL_HEIGHT = Math.min(screenHeight * 0.62, screenHeight - (insets.top + 16) - PANEL_BOTTOM);
 
   // Open/close animation — only mount while open or animating
   useEffect(() => {
