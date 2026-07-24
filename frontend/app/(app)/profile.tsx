@@ -1,12 +1,13 @@
 import React, { useCallback, useEffect, useState } from "react";
 import {
   View, StyleSheet, ScrollView, TouchableOpacity, Image,
-  Modal, Pressable, Share, Linking, Alert,
+  Modal, Pressable, Share, Linking, Alert, ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import { Feather } from "@expo/vector-icons";
+import * as ImagePicker from "expo-image-picker";
 import Animated, {
   FadeIn, FadeInDown, FadeInUp,
   useAnimatedStyle, useSharedValue,
@@ -19,7 +20,6 @@ import { api } from "@/src/api/client";
 import { NxText } from "@/src/components/NxText";
 import { Avatar } from "@/src/components/Avatar";
 import { VerifiedBadge } from "@/src/components/VerifiedBadge";
-import { AnimatedStatusText } from "@/src/components/AnimatedStatusText";
 import { fonts, radii, spacing } from "@/src/theme";
 import { DOCK_PAD } from "@/src/theme/layout";
 
@@ -53,6 +53,32 @@ export default function Profile() {
   const [reveriesCount, setReveriesCount] = useState(0);
   const [onlineSheetOpen, setOnlineSheetOpen] = useState(false);
   const [onlineStatusBusy, setOnlineStatusBusy] = useState(false);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+
+  const pickProfilePhoto = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== "granted") {
+      Alert.alert("Permission needed", "Allow photo access to change your profile picture.");
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.85,
+      base64: true,
+      allowsEditing: true,
+      aspect: [1, 1],
+    });
+    if (result.canceled || !result.assets?.[0]?.base64) return;
+    const dataUrl = `data:image/jpeg;base64,${result.assets[0].base64}`;
+    setUploadingPhoto(true);
+    try {
+      await updateUser({ profile_picture: dataUrl });
+    } catch {
+      Alert.alert("Upload failed", "Could not update profile photo. Please try again.");
+    } finally {
+      setUploadingPhoto(false);
+    }
+  };
 
   const storyRingRotation = useSharedValue(0);
   const completionWidth = useSharedValue(0);
@@ -214,12 +240,15 @@ export default function Profile() {
                   onlineStatus={user.online_status || "online"}
                 />
               </View>
-              {/* Edit overlay badge */}
+              {/* Edit overlay badge — taps directly open photo picker */}
               <TouchableOpacity
-                onPress={() => router.push("/settings/edit-profile")}
+                onPress={pickProfilePhoto}
+                disabled={uploadingPhoto}
                 style={[styles.avatarEditBadge, { backgroundColor: colors.primary, borderColor: colors.background }]}
               >
-                <Feather name="camera" size={11} color={colors.onPrimary} />
+                {uploadingPhoto
+                  ? <ActivityIndicator size={11} color={colors.onPrimary} />
+                  : <Feather name="camera" size={11} color={colors.onPrimary} />}
               </TouchableOpacity>
             </TouchableOpacity>
           </View>
@@ -303,21 +332,6 @@ export default function Profile() {
                 </NxText>
               </TouchableOpacity>
             )}
-
-            {/* Status thought bubble */}
-            <TouchableOpacity
-              activeOpacity={0.8}
-              onPress={() => router.push("/settings/status")}
-              style={[styles.statusBubbleRow, { borderColor: colors.border }]}
-            >
-              <View style={[styles.statusBubbleIcon, { backgroundColor: `${colors.primary}22` }]}>
-                <Feather name="message-circle" size={13} color={colors.primary} />
-              </View>
-              <AnimatedStatusText color={user.status_text ? colors.foreground : colors.mutedFg} style={{ flex: 1, fontSize: 13, fontFamily: fonts.body }}>
-                {user.status_text || "Set a status…"}
-              </AnimatedStatusText>
-              <Feather name="edit-2" size={12} color={colors.mutedFg} />
-            </TouchableOpacity>
 
             {/* Meta row */}
             <View style={styles.metaRow}>
@@ -731,14 +745,6 @@ const styles = StyleSheet.create({
   },
   bioText: { fontFamily: fonts.body, fontSize: 14, lineHeight: 22 },
   bioPlaceholder: { fontFamily: fonts.body, fontSize: 14, fontStyle: "italic" },
-  statusBubbleRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    paddingVertical: 10,
-    borderTopWidth: StyleSheet.hairlineWidth,
-  },
-  statusBubbleIcon: { width: 28, height: 28, borderRadius: 14, alignItems: "center", justifyContent: "center" },
   metaRow: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
   metaItem: { flexDirection: "row", alignItems: "center", gap: 5 },
   metaText: { fontFamily: fonts.body, fontSize: 13 },
