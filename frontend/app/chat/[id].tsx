@@ -802,6 +802,7 @@ export default function ChatScreen() {
               isMe={item.sender_id === user?.user_id}
               onLongPress={() => setActionMsg(item)}
               replySource={item.reply_to ? messages.find((x) => x.message_id === item.reply_to) : undefined}
+              other={other}
             />
           )}
           keyboardShouldPersistTaps="handled"
@@ -1118,10 +1119,22 @@ function RecordingBar({ elapsed, onCancel, colors }: { elapsed: number; onCancel
 }
 
 /* ── Message bubble ───────────────────────────────────────────────── */
-function MessageBubble({ m, isMe, onLongPress, replySource }: { m: Msg; isMe: boolean; onLongPress: () => void; replySource?: Msg }) {
+function MessageBubble({
+  m,
+  isMe,
+  onLongPress,
+  replySource,
+  other,
+}: {
+  m: Msg;
+  isMe: boolean;
+  onLongPress: () => void;
+  replySource?: Msg;
+  other?: any;
+}) {
   const { colors } = useTheme();
-  const bg = isMe ? colors.bubbleSent : colors.bubbleRecv;
-  const fg = isMe ? colors.bubbleSentFg : colors.bubbleRecvFg;
+  const bubbleBg = isMe ? colors.bubbleSent : colors.bubbleRecv;
+  const bubbleFg = isMe ? colors.bubbleSentFg : colors.bubbleRecvFg;
   const isDeleted = m.deleted_for_everyone || m.kind === "deleted";
   const isVoice = m.kind === "voice" && !!m.media;
   const isImage = m.kind === "image" && !!m.media;
@@ -1132,235 +1145,201 @@ function MessageBubble({ m, isMe, onLongPress, replySource }: { m: Msg; isMe: bo
     acc[r.emoji] = (acc[r.emoji] || 0) + 1;
     return acc;
   }, {});
-
   const groupedList = Object.entries(grouped);
+
+  // ── Meta row (time + read receipt) ──────────────────────────────────
+  const MetaRow = () => (
+    <View style={styles.msgMeta}>
+      {m.edited ? (
+        <NxText style={[styles.msgMetaText, { color: bubbleFg, marginRight: 4 }]}>edited</NxText>
+      ) : null}
+      <NxText style={[styles.msgMetaText, { color: bubbleFg }]}>{time}</NxText>
+      {isMe ? (
+        <NxText
+          style={[
+            styles.msgMetaTick,
+            { color: isRead ? colors.primary : bubbleFg, opacity: isRead ? 1 : 0.6 },
+          ]}
+        >
+          {isRead ? "✓✓" : "✓"}
+        </NxText>
+      ) : null}
+    </View>
+  );
 
   return (
     <View
-      style={{
-        alignItems: isMe ? "flex-end" : "flex-start",
-        marginTop: 2,
-        marginBottom: groupedList.length > 0 ? 10 : 3,
-      }}
+      style={[
+        styles.msgRow,
+        isMe ? styles.msgRowMe : styles.msgRowThem,
+        { marginBottom: groupedList.length > 0 ? 14 : 5 },
+      ]}
     >
-      <TouchableOpacity
-        onLongPress={() => {
-          try {
-            if (Platform.OS !== "web") {
-              Haptics.impactAsync(
-                Haptics.ImpactFeedbackStyle.Medium
-              ).catch(() => {});
-            }
-          } catch {}
-          onLongPress();
-        }}
-        activeOpacity={0.85}
-        testID={`msg-${m.message_id}`}
-        style={{ maxWidth: "84%" }}
-      >
-        {isVoice ? (
-          <View>
-            <VoiceBubble
-              mediaUri={m.media!}
-              duration={m.content}
-              messageId={m.message_id}
-              isMe={isMe}
+      {/* ── Avatar for received messages (mirrors AI chat badge) ── */}
+      {!isMe && (
+        <View style={[styles.msgAvatar, { backgroundColor: colors.accent }]}>
+          {other?.profile_picture ? (
+            <Image
+              source={{ uri: other.profile_picture }}
+              style={{ width: 28, height: 28, borderRadius: 14 }}
             />
+          ) : (
+            <NxText style={{ color: colors.mutedFg, fontSize: 12, fontFamily: fonts.bodySemi }}>
+              {(other?.display_name || "?")[0].toUpperCase()}
+            </NxText>
+          )}
+        </View>
+      )}
 
-            <View
-              style={{
-                flexDirection: "row",
-                alignItems: "center",
-                justifyContent: "flex-end",
-                marginTop: 3,
-                marginHorizontal: 5,
-              }}
-            >
-              <NxText
-                style={{
-                  fontSize: 10,
-                  color: colors.mutedFg,
-                }}
-              >
-                {time}
-              </NxText>
-
-              {isMe ? (
-                <NxText
-                  style={{
-                    marginLeft: 4,
-                    fontSize: 11,
-                    color: isRead ? colors.primary : colors.mutedFg,
-                    fontFamily: fonts.bodySemi,
-                  }}
-                >
-                  {isRead ? "✓✓" : "✓"}
-                </NxText>
-              ) : null}
+      {/* ── Bubble + reactions ── */}
+      <View style={{ maxWidth: "76%", alignItems: isMe ? "flex-end" : "flex-start" }}>
+        <TouchableOpacity
+          onLongPress={() => {
+            try {
+              if (Platform.OS !== "web")
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+            } catch {}
+            onLongPress();
+          }}
+          activeOpacity={0.85}
+          testID={`msg-${m.message_id}`}
+        >
+          {/* ── Voice bubble ── */}
+          {isVoice ? (
+            <View>
+              <VoiceBubble
+                mediaUri={m.media!}
+                duration={m.content}
+                messageId={m.message_id}
+                isMe={isMe}
+              />
+              <View style={[styles.msgMeta, { marginHorizontal: 6, marginTop: 3 }]}>
+                <NxText style={[styles.msgMetaText, { color: colors.mutedFg }]}>{time}</NxText>
+                {isMe ? (
+                  <NxText
+                    style={[
+                      styles.msgMetaTick,
+                      { color: isRead ? colors.primary : colors.mutedFg },
+                    ]}
+                  >
+                    {isRead ? "✓✓" : "✓"}
+                  </NxText>
+                ) : null}
+              </View>
             </View>
-          </View>
-        ) : (
-          <View
-            style={{
-              backgroundColor: bg,
-              paddingVertical: isImage ? 4 : 9,
-              paddingHorizontal: isImage ? 4 : 13,
-              borderRadius: 20,
-              borderBottomRightRadius: isMe ? 5 : 20,
-              borderBottomLeftRadius: isMe ? 20 : 5,
-              overflow: "hidden",
-            }}
-          >
-            {replySource ? (
-              <View
-                style={{
-                  borderLeftWidth: 2,
-                  borderLeftColor: fg,
-                  paddingLeft: 8,
-                  marginHorizontal: isImage ? 6 : 0,
-                  marginTop: isImage ? 6 : 0,
-                  marginBottom: 7,
-                  opacity: 0.82,
-                }}
-              >
-                <NxText
-                  numberOfLines={2}
-                  style={{
-                    color: fg,
-                    fontSize: 12,
-                    fontFamily: fonts.bodySemi,
-                  }}
+          ) : (
+            /* ── Text / image bubble ── */
+            <View
+              style={[
+                styles.bubble,
+                {
+                  backgroundColor: bubbleBg,
+                  paddingVertical: isImage ? 4 : 8,
+                  paddingHorizontal: isImage ? 4 : 12,
+                },
+              ]}
+            >
+              {/* Reply preview */}
+              {replySource ? (
+                <View
+                  style={[
+                    styles.replyPreview,
+                    {
+                      borderLeftColor: bubbleFg,
+                      backgroundColor: isMe
+                        ? "rgba(255,255,255,0.12)"
+                        : "rgba(0,0,0,0.06)",
+                    },
+                  ]}
                 >
-                  {replySource.kind === "voice"
-                    ? "🎙 Voice message"
-                    : replySource.kind === "image"
+                  <NxText
+                    numberOfLines={2}
+                    style={{ color: bubbleFg, fontSize: 12, fontFamily: fonts.bodySemi, opacity: 0.85 }}
+                  >
+                    {replySource.kind === "voice"
+                      ? "🎙 Voice message"
+                      : replySource.kind === "image"
                       ? "📷 Photo"
                       : replySource.content
-                        ? replySource.content.slice(0, 60)
-                        : "Message"}
-                </NxText>
-              </View>
-            ) : null}
+                      ? replySource.content.slice(0, 60)
+                      : "Message"}
+                  </NxText>
+                </View>
+              ) : null}
 
-            {isDeleted ? (
-              <NxText
-                style={{
-                  color: fg,
-                  fontStyle: "italic",
-                  fontSize: 14,
-                  opacity: 0.8,
-                }}
-              >
-                Message removed
-              </NxText>
-            ) : isImage ? (
-              <Image
-                source={{ uri: m.media! }}
-                resizeMode="cover"
-                style={{
-                  width: 230,
-                  height: 230,
-                  borderRadius: 16,
-                }}
-              />
-            ) : (
-              <NxText
-                style={{
-                  color: fg,
-                  fontSize: 15,
-                  lineHeight: 20,
-                  fontFamily: "Outfit",
-                }}
-              >
-                {m.content}
-              </NxText>
-            )}
-
-            <View
-              style={{
-                flexDirection: "row",
-                alignItems: "center",
-                alignSelf: "flex-end",
-                marginTop: isImage ? 5 : 3,
-                marginHorizontal: isImage ? 7 : 0,
-                marginBottom: isImage ? 3 : 0,
-              }}
-            >
-              {m.edited ? (
+              {/* Content */}
+              {isDeleted ? (
                 <NxText
                   style={{
-                    color: fg,
-                    fontSize: 10,
+                    color: bubbleFg,
+                    fontStyle: "italic",
+                    fontSize: 14,
                     opacity: 0.65,
-                    marginRight: 5,
                   }}
                 >
-                  edited
+                  🚫 Message removed
                 </NxText>
-              ) : null}
-
-              <NxText
-                style={{
-                  color: fg,
-                  fontSize: 10,
-                  opacity: 0.68,
-                }}
-              >
-                {time}
-              </NxText>
-
-              {isMe ? (
+              ) : isImage ? (
+                <Image
+                  source={{ uri: m.media! }}
+                  resizeMode="cover"
+                  style={{ width: 220, height: 220, borderRadius: 14 }}
+                />
+              ) : (
                 <NxText
                   style={{
-                    marginLeft: 4,
-                    fontSize: 11,
-                    lineHeight: 14,
-                    color: isRead ? colors.primary : fg,
-                    opacity: isRead ? 1 : 0.72,
-                    fontFamily: fonts.bodySemi,
+                    color: bubbleFg,
+                    fontSize: 14,
+                    lineHeight: 20,
+                    fontFamily: fonts.body,
                   }}
                 >
-                  {isRead ? "✓✓" : "✓"}
+                  {m.content}
                 </NxText>
-              ) : null}
-            </View>
-          </View>
-        )}
-      </TouchableOpacity>
+              )}
 
-      {groupedList.length > 0 ? (
-        <Animated.View
-          entering={ZoomIn.springify().damping(14)}
-          style={[
-            styles.reactionsRow,
-            {
-              backgroundColor: colors.background,
-              borderColor: colors.border,
-              marginTop: -7,
-              marginRight: isMe ? 8 : 0,
-              marginLeft: isMe ? 0 : 8,
-            },
-          ]}
-        >
-          {groupedList.map(([emoji, count]) => (
-            <View key={emoji} style={styles.reactionChip}>
-              <NxText style={{ fontSize: 14 }}>{emoji}</NxText>
-              {count > 1 ? (
-                <NxText
-                  style={{
-                    color: colors.foreground,
-                    fontSize: 11,
-                    fontFamily: fonts.bodySemi,
-                    marginLeft: 3,
-                  }}
-                >
-                  {count}
-                </NxText>
-              ) : null}
+              {/* Time + tick */}
+              <MetaRow />
             </View>
-          ))}
-        </Animated.View>
-      ) : null}
+          )}
+        </TouchableOpacity>
+
+        {/* Reactions row */}
+        {groupedList.length > 0 ? (
+          <Animated.View
+            entering={ZoomIn.springify().damping(14)}
+            style={[
+              styles.reactionsRow,
+              {
+                backgroundColor: colors.background,
+                borderColor: colors.border,
+                marginTop: -6,
+                alignSelf: isMe ? "flex-end" : "flex-start",
+                marginRight: isMe ? 4 : 0,
+                marginLeft: isMe ? 0 : 4,
+              },
+            ]}
+          >
+            {groupedList.map(([emoji, count]) => (
+              <View key={emoji} style={styles.reactionChip}>
+                <NxText style={{ fontSize: 13 }}>{emoji}</NxText>
+                {count > 1 ? (
+                  <NxText
+                    style={{
+                      color: colors.foreground,
+                      fontSize: 11,
+                      fontFamily: fonts.bodySemi,
+                      marginLeft: 2,
+                    }}
+                  >
+                    {count}
+                  </NxText>
+                ) : null}
+              </View>
+            ))}
+          </Animated.View>
+        ) : null}
+      </View>
     </View>
   );
 }
@@ -1399,6 +1378,61 @@ function SheetAction({ icon, label, onPress, testID, tint }: any) {
 }
 
 const styles = StyleSheet.create({
+  // ── Message bubble (AI-chat style) ──────────────────────────────────
+  msgRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    marginTop: 2,
+  },
+  msgRowMe: {
+    justifyContent: "flex-end",
+  },
+  msgRowThem: {
+    justifyContent: "flex-start",
+  },
+  msgAvatar: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    overflow: "hidden",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 7,
+    marginBottom: 2,
+    flexShrink: 0,
+  },
+  bubble: {
+    borderRadius: 18,
+    overflow: "hidden",
+  },
+  replyPreview: {
+    borderLeftWidth: 2,
+    borderRadius: 4,
+    paddingLeft: 8,
+    paddingVertical: 4,
+    paddingRight: 6,
+    marginBottom: 6,
+  },
+  msgMeta: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-end",
+    marginTop: 3,
+    gap: 2,
+  },
+  msgMetaText: {
+    fontSize: 10,
+    opacity: 0.62,
+    fontFamily: "Outfit",
+  },
+  msgMetaTick: {
+    fontSize: 11,
+    lineHeight: 14,
+    marginLeft: 2,
+    fontFamily: "Outfit-SemiBold",
+  },
+
+  // ── Shared ──────────────────────────────────────────────────────────
   chatSkeleton: {
     flex: 1,
     paddingHorizontal: spacing.md,
