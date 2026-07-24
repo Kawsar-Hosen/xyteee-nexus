@@ -170,19 +170,12 @@ export default function Profile() {
             style={StyleSheet.absoluteFillObject}
           />
 
-          {/* Header action buttons */}
+          {/* Header action buttons — settings only; share & theme are below */}
           <View style={styles.coverActions}>
-            <TouchableOpacity onPress={toggle} style={[styles.glassBtn, { backgroundColor: "rgba(0,0,0,0.32)" }]}>
-              <Feather name={mode === "dark" ? "sun" : "moon"} size={16} color="#fff" />
+            <View />
+            <TouchableOpacity onPress={() => router.push("/settings")} style={[styles.glassBtn, { backgroundColor: "rgba(0,0,0,0.38)" }]}>
+              <Feather name="settings" size={17} color="#fff" />
             </TouchableOpacity>
-            <View style={{ flexDirection: "row", gap: 10 }}>
-              <TouchableOpacity onPress={handleShare} style={[styles.glassBtn, { backgroundColor: "rgba(0,0,0,0.32)" }]}>
-                <Feather name="share-2" size={16} color="#fff" />
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => router.push("/settings")} style={[styles.glassBtn, { backgroundColor: "rgba(0,0,0,0.32)" }]}>
-                <Feather name="settings" size={16} color="#fff" />
-              </TouchableOpacity>
-            </View>
           </View>
         </View>
 
@@ -264,30 +257,37 @@ export default function Profile() {
           <StatCol value={sinceValue} label="Since" accent={colors.mutedFg} />
         </Animated.View>
 
-        {/* ═══════════════ ACTION PILLS ═══════════════ */}
+        {/* ═══════════════ ACTION ROW ═══════════════ */}
         <Animated.View entering={FadeInDown.delay(100).duration(450)} style={styles.actionRow}>
-          <ActionPill
-            icon="edit-2" label="Edit Profile"
+          {/* Primary: Edit Profile — full width */}
+          <TouchableOpacity
             onPress={() => router.push("/settings/edit-profile")}
-            primary colors={colors}
-          />
-          <ActionPill
-            icon="bell" label="Alerts"
-            onPress={() => router.push("/notifications")}
-            colors={colors}
-          />
-          <ActionPill
-            icon="share-2" label="Share"
-            onPress={handleShare}
-            colors={colors}
-          />
-          {user.email === ADMIN_EMAIL && (
-            <ActionPill
-              icon="shield" label="Admin"
-              onPress={() => router.push("/admin")}
-              colors={colors}
-            />
-          )}
+            activeOpacity={0.82}
+            style={[styles.actionPrimary, { backgroundColor: colors.primary }]}
+          >
+            <Feather name="edit-2" size={15} color={colors.onPrimary} />
+            <NxText style={[styles.actionPrimaryLabel, { color: colors.onPrimary }]}>Edit Profile</NxText>
+          </TouchableOpacity>
+
+          {/* Secondary row: Alerts + Share */}
+          <View style={styles.actionSecondaryRow}>
+            <TouchableOpacity
+              onPress={() => router.push("/notifications")}
+              activeOpacity={0.82}
+              style={[styles.actionSecondary, { backgroundColor: colors.surface, borderColor: colors.border }]}
+            >
+              <Feather name="bell" size={15} color={colors.foreground} />
+              <NxText style={[styles.actionSecondaryLabel, { color: colors.foreground }]}>Alerts</NxText>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={handleShare}
+              activeOpacity={0.82}
+              style={[styles.actionSecondary, { backgroundColor: colors.surface, borderColor: colors.border }]}
+            >
+              <Feather name="share-2" size={15} color={colors.foreground} />
+              <NxText style={[styles.actionSecondaryLabel, { color: colors.foreground }]}>Share</NxText>
+            </TouchableOpacity>
+          </View>
         </Animated.View>
 
         <View style={[styles.bodyPad]}>
@@ -417,7 +417,10 @@ export default function Profile() {
             <SectionLabel icon="heart" label="Social" colors={colors} />
             <MenuCard colors={colors}>
               <MenuItem icon="bell" label="Notifications" onPress={() => router.push("/notifications")} colors={colors} />
-              <MenuItem icon="users" label="My Bonds" badge={bondsCount > 0 ? String(bondsCount) : undefined} onPress={() => router.push("/(app)/friends")} colors={colors} last />
+              <MenuItem icon="users" label="My Bonds" badge={bondsCount > 0 ? String(bondsCount) : undefined} onPress={() => router.push("/(app)/friends")} colors={colors} last={user.email !== ADMIN_EMAIL} />
+              {user.email === ADMIN_EMAIL && (
+                <MenuItem icon="shield" label="Admin Panel" tint={colors.primary} onPress={() => router.push("/admin")} colors={colors} last />
+              )}
             </MenuCard>
 
             {/* Account group */}
@@ -531,25 +534,6 @@ function StatCol({ value, label, accent }: { value: string; label: string; accen
   );
 }
 
-function ActionPill({ icon, label, onPress, primary, colors }: any) {
-  return (
-    <TouchableOpacity
-      onPress={onPress}
-      activeOpacity={0.8}
-      style={[
-        styles.actionPill,
-        primary
-          ? { backgroundColor: colors.primary, borderColor: colors.primary }
-          : { backgroundColor: colors.surface, borderColor: colors.border },
-      ]}
-    >
-      <Feather name={icon} size={15} color={primary ? colors.onPrimary : colors.foreground} />
-      <NxText style={[styles.actionPillLabel, { color: primary ? colors.onPrimary : colors.foreground }]}>
-        {label}
-      </NxText>
-    </TouchableOpacity>
-  );
-}
 
 function SectionLabel({ icon, label, colors, children }: any) {
   return (
@@ -698,24 +682,42 @@ const styles = StyleSheet.create({
   statLabel: { fontFamily: fonts.body, fontSize: 12, color: "#888", marginTop: 3 },
   statDivider: { width: 1, height: 38 },
 
-  // Action pills
+  // Action row
   actionRow: {
-    flexDirection: "row",
-    gap: 10,
     paddingHorizontal: spacing.lg,
     marginTop: spacing.md,
-    flexWrap: "wrap",
+    gap: 10,
   },
-  actionPill: {
+  actionPrimary: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 13,
+    borderRadius: radii.xl,
+  },
+  actionPrimaryLabel: {
+    fontFamily: fonts.bodySemi,
+    fontSize: 15,
+  },
+  actionSecondaryRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  actionSecondary: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
     gap: 7,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: radii.pill,
+    paddingVertical: 12,
+    borderRadius: radii.xl,
     borderWidth: 1,
   },
-  actionPillLabel: { fontFamily: fonts.bodySemi, fontSize: 13 },
+  actionSecondaryLabel: {
+    fontFamily: fonts.bodySemi,
+    fontSize: 14,
+  },
 
   // Body pad
   bodyPad: { paddingHorizontal: spacing.lg, marginTop: spacing.md },
