@@ -17,7 +17,6 @@ import relativeTime from "dayjs/plugin/relativeTime";
 import { useTheme } from "@/src/context/ThemeContext";
 import { useAuth } from "@/src/context/AuthContext";
 import { useWs } from "@/src/context/WsContext";
-import { useAIChat } from "@/src/context/AIChatContext";
 import { api } from "@/src/api/client";
 import { NxText } from "@/src/components/NxText";
 import { Avatar } from "@/src/components/Avatar";
@@ -69,7 +68,6 @@ export default function Feed() {
   const { user, token } = useAuth();
   const { subscribe } = useWs();
   const router = useRouter();
-  const { openChat } = useAIChat();
 
   const [stories, setStories] = useState<StoryGroup[]>(
     () => feedCache?.stories || []
@@ -271,12 +269,6 @@ export default function Feed() {
           </View>
         </View>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-          <TouchableOpacity
-            onPress={openChat}
-            style={[styles.iconBtn, { backgroundColor: colors.primary }]}
-          >
-            <Feather name="cpu" size={18} color={colors.onPrimary} />
-          </TouchableOpacity>
           <TouchableOpacity
             testID="feed-open-notifications"
             onPress={() => router.push("/notifications")}
