@@ -12,6 +12,7 @@ import {
   Modal,
   Pressable,
   Keyboard,
+  useWindowDimensions,
 } from "react-native";
 import Animated, {
   useSharedValue,
@@ -724,49 +725,55 @@ export default function ChatScreen() {
       </Modal>
 
       {/* ── Header ──────────────────────────────────────────────────── */}
-      <View style={[styles.header, { borderBottomColor: colors.border }]}>
+      <View style={[styles.header, { borderBottomColor: colors.border, backgroundColor: colors.background }]}>
         <TouchableOpacity testID="chat-back" onPress={() => router.back()} style={styles.iconBtn}>
-          <Feather name="chevron-left" size={26} color={colors.foreground} />
+          <Feather name="chevron-left" size={28} color={colors.foreground} />
         </TouchableOpacity>
-        <TouchableOpacity style={{ flexDirection: "row", alignItems: "center", flex: 1 }} onPress={() => other && router.push(`/user/${other.user_id}`)}>
+        <TouchableOpacity style={{ flexDirection: "row", alignItems: "center", flex: 1, minWidth: 0 }} onPress={() => other && router.push(`/user/${other.user_id}`)}>
           <Avatar
             uri={other?.profile_picture}
             name={other?.display_name}
-            size={38}
+            size={40}
             online={other?.online}
             onlineStatus={other?.online_status || "online"}
           />
-          <View style={{ marginLeft: 12 }}>
+          <View style={{ marginLeft: 10, flex: 1, minWidth: 0 }}>
             <View style={{ flexDirection: "row", alignItems: "center" }}>
-              <NxText variant="titleSm" numberOfLines={1}>{other?.display_name || "…"}</NxText>
-              <VerifiedBadge badgeType={other?.badge_type} size={16} />
+              <NxText variant="titleSm" numberOfLines={1} style={{ fontSize: 16, fontFamily: fonts.bodySemi, flexShrink: 1 }}>{other?.display_name || "…"}</NxText>
+              <VerifiedBadge badgeType={other?.badge_type} size={15} />
             </View>
-            <NxText variant="caption" style={{ color: otherTyping ? colors.primary : colors.mutedFg }}>
+            <NxText
+              variant="caption"
+              numberOfLines={1}
+              style={{ color: otherTyping ? colors.primary : colors.mutedFg, fontSize: 12, marginTop: 1 }}
+            >
               {otherTyping ? "typing…" : lastSeen}
             </NxText>
           </View>
         </TouchableOpacity>
-        <TouchableOpacity
-          testID="chat-voice-call"
-          onPress={startCall}
-          disabled={callState !== "idle"}
-          style={styles.iconBtn}
-        >
-          <Feather name="phone" size={20} color={colors.foreground} />
-        </TouchableOpacity>
+        <View style={{ flexDirection: "row", alignItems: "center" }}>
+          <TouchableOpacity
+            testID="chat-voice-call"
+            onPress={startCall}
+            disabled={callState !== "idle"}
+            style={styles.iconBtn}
+          >
+            <Feather name="phone" size={20} color={colors.foreground} />
+          </TouchableOpacity>
 
-        <TouchableOpacity
-          testID="chat-video-call"
-          onPress={startVideoCall}
-          disabled={videoCallState !== "idle"}
-          style={styles.iconBtn}
-        >
-          <Feather name="video" size={20} color={colors.foreground} />
-        </TouchableOpacity>
+          <TouchableOpacity
+            testID="chat-video-call"
+            onPress={startVideoCall}
+            disabled={videoCallState !== "idle"}
+            style={styles.iconBtn}
+          >
+            <Feather name="video" size={20} color={colors.foreground} />
+          </TouchableOpacity>
 
-        <TouchableOpacity testID="chat-search-toggle" onPress={() => setShowSearch((s) => !s)} style={styles.iconBtn}>
-          <Feather name="search" size={20} color={colors.foreground} />
-        </TouchableOpacity>
+          <TouchableOpacity testID="chat-search-toggle" onPress={() => setShowSearch((s) => !s)} style={styles.iconBtn}>
+            <Feather name="search" size={20} color={colors.foreground} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {showSearch ? (
@@ -793,8 +800,9 @@ export default function ChatScreen() {
           data={displayed}
           keyExtractor={(m) => m.message_id}
           contentContainerStyle={{
-            padding: spacing.md,
-            paddingBottom: inputBarHeight + spacing.lg,
+            paddingHorizontal: spacing.sm,
+            paddingTop: spacing.md,
+            paddingBottom: inputBarHeight + spacing.xl,
           }}
           renderItem={({ item }) => (
             <MessageBubble
@@ -1133,6 +1141,7 @@ function MessageBubble({
   other?: any;
 }) {
   const { colors } = useTheme();
+  const { width: screenWidth } = useWindowDimensions();
   const bubbleBg = isMe ? colors.bubbleSent : colors.bubbleRecv;
   const bubbleFg = isMe ? colors.bubbleSentFg : colors.bubbleRecvFg;
   const isDeleted = m.deleted_for_everyone || m.kind === "deleted";
@@ -1140,6 +1149,11 @@ function MessageBubble({
   const isImage = m.kind === "image" && !!m.media;
   const isRead = (m.read_by?.length || 0) > 1;
   const time = dayjs(m.created_at).format("HH:mm");
+
+  // Responsive max bubble width: 78% of screen, capped at 320px
+  const bubbleMaxWidth = Math.min(screenWidth * 0.78, 320);
+  // Image size scales with screen
+  const imageSize = Math.min(screenWidth * 0.62, 240);
 
   const grouped = (m.reactions || []).reduce<Record<string, number>>((acc, r) => {
     acc[r.emoji] = (acc[r.emoji] || 0) + 1;
@@ -1151,14 +1165,14 @@ function MessageBubble({
   const MetaRow = () => (
     <View style={styles.msgMeta}>
       {m.edited ? (
-        <NxText style={[styles.msgMetaText, { color: bubbleFg, marginRight: 4 }]}>edited</NxText>
+        <NxText style={[styles.msgMetaText, { color: bubbleFg, opacity: 0.7, marginRight: 3 }]}>edited</NxText>
       ) : null}
-      <NxText style={[styles.msgMetaText, { color: bubbleFg }]}>{time}</NxText>
+      <NxText style={[styles.msgMetaText, { color: bubbleFg, opacity: 0.72 }]}>{time}</NxText>
       {isMe ? (
         <NxText
           style={[
             styles.msgMetaTick,
-            { color: isRead ? colors.primary : bubbleFg, opacity: isRead ? 1 : 0.6 },
+            { color: isRead ? colors.primary : bubbleFg, opacity: isRead ? 1 : 0.55 },
           ]}
         >
           {isRead ? "✓✓" : "✓"}
@@ -1167,21 +1181,28 @@ function MessageBubble({
     </View>
   );
 
+  // Bubble tail shape: sent → bottom-right corner flat, recv → bottom-left flat
+  const bubbleRadius = {
+    borderRadius: 20,
+    borderBottomRightRadius: isMe ? 4 : 20,
+    borderBottomLeftRadius: isMe ? 20 : 4,
+  };
+
   return (
     <View
       style={[
         styles.msgRow,
         isMe ? styles.msgRowMe : styles.msgRowThem,
-        { marginBottom: groupedList.length > 0 ? 14 : 5 },
+        { marginBottom: groupedList.length > 0 ? 16 : 6 },
       ]}
     >
-      {/* ── Avatar for received messages (mirrors AI chat badge) ── */}
+      {/* ── Avatar for received messages ── */}
       {!isMe && (
         <View style={[styles.msgAvatar, { backgroundColor: colors.accent }]}>
           {other?.profile_picture ? (
             <Image
               source={{ uri: other.profile_picture }}
-              style={{ width: 28, height: 28, borderRadius: 14 }}
+              style={{ width: 30, height: 30, borderRadius: 15 }}
             />
           ) : (
             <NxText style={{ color: colors.mutedFg, fontSize: 12, fontFamily: fonts.bodySemi }}>
@@ -1192,7 +1213,7 @@ function MessageBubble({
       )}
 
       {/* ── Bubble + reactions ── */}
-      <View style={{ maxWidth: "76%", alignItems: isMe ? "flex-end" : "flex-start" }}>
+      <View style={{ maxWidth: bubbleMaxWidth, alignItems: isMe ? "flex-end" : "flex-start" }}>
         <TouchableOpacity
           onLongPress={() => {
             try {
@@ -1201,7 +1222,7 @@ function MessageBubble({
             } catch {}
             onLongPress();
           }}
-          activeOpacity={0.85}
+          activeOpacity={0.82}
           testID={`msg-${m.message_id}`}
         >
           {/* ── Voice bubble ── */}
@@ -1213,7 +1234,7 @@ function MessageBubble({
                 messageId={m.message_id}
                 isMe={isMe}
               />
-              <View style={[styles.msgMeta, { marginHorizontal: 6, marginTop: 3 }]}>
+              <View style={[styles.msgMeta, { marginHorizontal: 6, marginTop: 4 }]}>
                 <NxText style={[styles.msgMetaText, { color: colors.mutedFg }]}>{time}</NxText>
                 {isMe ? (
                   <NxText
@@ -1232,10 +1253,16 @@ function MessageBubble({
             <View
               style={[
                 styles.bubble,
+                bubbleRadius,
                 {
                   backgroundColor: bubbleBg,
-                  paddingVertical: isImage ? 4 : 8,
-                  paddingHorizontal: isImage ? 4 : 12,
+                  paddingVertical: isImage ? 4 : 9,
+                  paddingHorizontal: isImage ? 4 : 13,
+                  // Soft shadow on sent bubbles
+                  ...(isMe ? (Platform.OS === "web"
+                    ? { boxShadow: `0px 3px 8px ${colors.primary}30` } as any
+                    : { shadowColor: colors.primary, shadowOpacity: 0.18, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 3 }
+                  ) : {}),
                 },
               ]}
             >
@@ -1245,23 +1272,23 @@ function MessageBubble({
                   style={[
                     styles.replyPreview,
                     {
-                      borderLeftColor: bubbleFg,
+                      borderLeftColor: isMe ? "rgba(0,0,0,0.35)" : colors.primary,
                       backgroundColor: isMe
-                        ? "rgba(255,255,255,0.12)"
-                        : "rgba(0,0,0,0.06)",
+                        ? "rgba(0,0,0,0.12)"
+                        : colors.primary + "18",
                     },
                   ]}
                 >
                   <NxText
                     numberOfLines={2}
-                    style={{ color: bubbleFg, fontSize: 12, fontFamily: fonts.bodySemi, opacity: 0.85 }}
+                    style={{ color: bubbleFg, fontSize: 12, fontFamily: fonts.bodySemi, opacity: 0.88 }}
                   >
                     {replySource.kind === "voice"
                       ? "🎙 Voice message"
                       : replySource.kind === "image"
                       ? "📷 Photo"
                       : replySource.content
-                      ? replySource.content.slice(0, 60)
+                      ? replySource.content.slice(0, 80)
                       : "Message"}
                   </NxText>
                 </View>
@@ -1274,7 +1301,7 @@ function MessageBubble({
                     color: bubbleFg,
                     fontStyle: "italic",
                     fontSize: 14,
-                    opacity: 0.65,
+                    opacity: 0.55,
                   }}
                 >
                   🚫 Message removed
@@ -1283,14 +1310,14 @@ function MessageBubble({
                 <Image
                   source={{ uri: m.media! }}
                   resizeMode="cover"
-                  style={{ width: 220, height: 220, borderRadius: 14 }}
+                  style={{ width: imageSize, height: imageSize, borderRadius: 14 }}
                 />
               ) : (
                 <NxText
                   style={{
                     color: bubbleFg,
-                    fontSize: 14,
-                    lineHeight: 20,
+                    fontSize: 15,
+                    lineHeight: 22,
                     fontFamily: fonts.body,
                   }}
                 >
@@ -1311,25 +1338,25 @@ function MessageBubble({
             style={[
               styles.reactionsRow,
               {
-                backgroundColor: colors.background,
+                backgroundColor: colors.surfaceHigh,
                 borderColor: colors.border,
-                marginTop: -6,
+                marginTop: -8,
                 alignSelf: isMe ? "flex-end" : "flex-start",
-                marginRight: isMe ? 4 : 0,
-                marginLeft: isMe ? 0 : 4,
+                marginRight: isMe ? 6 : 0,
+                marginLeft: isMe ? 0 : 6,
               },
             ]}
           >
             {groupedList.map(([emoji, count]) => (
               <View key={emoji} style={styles.reactionChip}>
-                <NxText style={{ fontSize: 13 }}>{emoji}</NxText>
+                <NxText style={{ fontSize: 14 }}>{emoji}</NxText>
                 {count > 1 ? (
                   <NxText
                     style={{
                       color: colors.foreground,
                       fontSize: 11,
                       fontFamily: fonts.bodySemi,
-                      marginLeft: 2,
+                      marginLeft: 3,
                     }}
                   >
                     {count}
@@ -1378,11 +1405,12 @@ function SheetAction({ icon, label, onPress, testID, tint }: any) {
 }
 
 const styles = StyleSheet.create({
-  // ── Message bubble (AI-chat style) ──────────────────────────────────
+  // ── Message bubble ───────────────────────────────────────────────────
   msgRow: {
     flexDirection: "row",
     alignItems: "flex-end",
     marginTop: 2,
+    paddingHorizontal: 4,
   },
   msgRowMe: {
     justifyContent: "flex-end",
@@ -1391,43 +1419,42 @@ const styles = StyleSheet.create({
     justifyContent: "flex-start",
   },
   msgAvatar: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     overflow: "hidden",
     alignItems: "center",
     justifyContent: "center",
-    marginRight: 7,
+    marginRight: 6,
     marginBottom: 2,
     flexShrink: 0,
   },
   bubble: {
-    borderRadius: 18,
+    borderRadius: 20,
     overflow: "hidden",
   },
   replyPreview: {
-    borderLeftWidth: 2,
-    borderRadius: 4,
-    paddingLeft: 8,
-    paddingVertical: 4,
-    paddingRight: 6,
-    marginBottom: 6,
+    borderLeftWidth: 3,
+    borderRadius: 6,
+    paddingLeft: 10,
+    paddingVertical: 5,
+    paddingRight: 8,
+    marginBottom: 7,
   },
   msgMeta: {
     flexDirection: "row",
     alignItems: "center",
     alignSelf: "flex-end",
-    marginTop: 3,
+    marginTop: 4,
     gap: 2,
   },
   msgMetaText: {
-    fontSize: 10,
-    opacity: 0.62,
+    fontSize: 11,
     fontFamily: "Outfit",
   },
   msgMetaTick: {
-    fontSize: 11,
-    lineHeight: 14,
+    fontSize: 12,
+    lineHeight: 15,
     marginLeft: 2,
     fontFamily: "Outfit-SemiBold",
   },
@@ -1438,16 +1465,29 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingTop: spacing.xl,
   },
-  header: { flexDirection: "row", alignItems: "center", paddingHorizontal: spacing.md, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth },
-  iconBtn: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
-  searchInput: { flexDirection: "row", alignItems: "center", borderRadius: radii.pill, borderWidth: 1, paddingHorizontal: 12, height: 40 },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    // subtle bottom shadow for depth
+    shadowColor: "#000",
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+  },
+  iconBtn: { width: 42, height: 42, alignItems: "center", justifyContent: "center" },
+  searchInput: { flexDirection: "row", alignItems: "center", borderRadius: radii.pill, borderWidth: 1, paddingHorizontal: 14, height: 40 },
   inputBar: {
     flexDirection: "row",
     alignItems: "flex-end",
     paddingHorizontal: 10,
-    paddingTop: 8,
-    paddingBottom: 10,
-    gap: 7,
+    paddingTop: 10,
+    paddingBottom: Platform.OS === "ios" ? 12 : 10,
+    gap: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
   },
   roundBtn: {
     width: 42,
@@ -1460,64 +1500,74 @@ const styles = StyleSheet.create({
   attachMenu: {
     position: "absolute",
     left: 0,
-    bottom: 52,
-    width: 150,
-    borderRadius: 18,
+    bottom: 56,
+    width: 160,
+    borderRadius: 20,
     borderWidth: 1,
     paddingVertical: 6,
-    elevation: 12,
+    elevation: 14,
     shadowColor: "#000",
-    shadowOpacity: 0.25,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
     zIndex: 50,
   },
   attachOption: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 13,
+    paddingHorizontal: 18,
+    paddingVertical: 14,
   },
   textField: {
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
     borderWidth: 1,
-    borderRadius: 22,
-    paddingLeft: 15,
+    borderRadius: 24,
+    paddingLeft: 16,
     paddingRight: 2,
-    minHeight: 42,
-    maxHeight: 100,
+    minHeight: 44,
+    maxHeight: 110,
   },
   chatTextInput: {
     flex: 1,
     fontFamily: "Outfit",
     fontWeight: "400",
     fontSize: 15,
-    lineHeight: 20,
-    minHeight: 40,
-    maxHeight: 96,
-    paddingTop: 10,
-    paddingBottom: 10,
-    paddingVertical: 0,
+    lineHeight: 21,
+    minHeight: 42,
+    maxHeight: 104,
+    paddingTop: Platform.OS === "ios" ? 11 : 10,
+    paddingBottom: Platform.OS === "ios" ? 11 : 10,
     textAlignVertical: "center",
   },
   emojiBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: "center",
     justifyContent: "center",
     marginLeft: 4,
   },
   sendBtn: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: "center",
     justifyContent: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
   },
-  replyBar: { flexDirection: "row", alignItems: "center", paddingHorizontal: spacing.lg, paddingVertical: 8, borderTopWidth: 1 },
+  replyBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: spacing.lg,
+    paddingVertical: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
   callOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.82)",

@@ -28,6 +28,17 @@ Set these in Replit Secrets before starting:
 | `SUPABASE_SERVICE_KEY` | Supabase service-role key |
 | `JWT_SECRET` | Secret key for signing JWTs (any long random string) |
 | `SESSION_SECRET` | Session secret (optional, used by some middleware) |
+| `GEMINI_API_KEY` | Google Gemini API key for AI chat assistant |
+
+## Chat UI
+
+The chat screen (`frontend/app/chat/[id].tsx`) has been upgraded for clarity on all phone sizes:
+- Responsive bubble width (78% of screen, max 320 px) via `useWindowDimensions`
+- WhatsApp-style bubble tails (flat corner on the send/receive side)
+- Larger font (15 px / 22 line-height) and cleaner timestamps
+- Sent bubble glow shadow using the gold accent colour
+- Elevated input bar with top border; send button with shadow
+- Header with `flexShrink` on name so long names never overflow icons
 
 ## Building the APK
 
