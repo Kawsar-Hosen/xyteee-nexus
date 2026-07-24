@@ -107,10 +107,9 @@ export function AIChatBox() {
   const slideAnim = useRef(new Animated.Value(0)).current;
   const listRef = useRef<FlatList<Message>>(null);
 
-  const DOCK_HEIGHT = 72 + Math.max(insets.bottom, 8);
-  const PANEL_BOTTOM = DOCK_HEIGHT + 10;
-  // Panel takes ~46% of screen height — compact so footer is never pushed down
-  const PANEL_HEIGHT = Math.min(screenHeight * 0.46, screenHeight - (insets.top + 16) - PANEL_BOTTOM);
+  // Panel is centered vertically on the screen, with safe-area margins
+  const PANEL_HEIGHT = Math.min(screenHeight * 0.58, 520);
+  const PANEL_TOP = Math.max(insets.top + 8, (screenHeight - PANEL_HEIGHT) / 2);
 
   // Open/close animation — only mount while open or animating
   useEffect(() => {
@@ -119,14 +118,14 @@ export function AIChatBox() {
       Animated.spring(slideAnim, {
         toValue: 1,
         damping: 22,
-        stiffness: 200,
+        stiffness: 220,
         useNativeDriver: true,
       }).start();
     } else {
       Animated.spring(slideAnim, {
         toValue: 0,
         damping: 22,
-        stiffness: 200,
+        stiffness: 220,
         useNativeDriver: true,
       }).start(({ finished }) => {
         if (finished) setMounted(false);
@@ -134,9 +133,13 @@ export function AIChatBox() {
     }
   }, [open]);
 
-  const panelTranslate = slideAnim.interpolate({
+  const panelScale = slideAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: [PANEL_HEIGHT + 60, 0],
+    outputRange: [0.92, 1],
+  });
+  const panelOpacity = slideAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 1],
   });
   const backdropOpacity = slideAnim.interpolate({
     inputRange: [0, 0.5],
@@ -274,11 +277,12 @@ export function AIChatBox() {
           style={[
             styles.panel,
             {
-              bottom: PANEL_BOTTOM,
+              top: PANEL_TOP,
               height: PANEL_HEIGHT,
               backgroundColor: colors.surface,
               borderColor: colors.border,
-              transform: [{ translateY: panelTranslate }],
+              opacity: panelOpacity,
+              transform: [{ scale: panelScale }],
             },
           ]}
           pointerEvents="auto"
