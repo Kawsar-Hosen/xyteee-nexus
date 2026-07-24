@@ -56,7 +56,7 @@ const WELCOME: Message = {
   id: "welcome",
   role: "assistant",
   content:
-    "Hi! I'm your XYTEEE Nexus assistant 👋\n\nAsk me anything, or type **@username** / **search name** to find a user's profile.",
+    "Hi! I'm your XYTEEE Nexus assistant 👋 Ask me anything about the app — chats, calls, friends, profiles, or anything else!",
 };
 
 /** Returns search query string if message looks like a user search, else null. */
@@ -335,22 +335,6 @@ export function AIChatBox() {
         </KeyboardAvoidingView>
       </Animated.View>
 
-      {/* ── Always-visible FAB ────────────────────────────────────────── */}
-      <TouchableOpacity
-        onPress={toggle}
-        activeOpacity={0.85}
-        pointerEvents="auto"
-        style={[
-          styles.fab,
-          {
-            bottom: FAB_BOTTOM,
-            backgroundColor: colors.primary,
-            shadowColor: colors.primary,
-          },
-        ]}
-      >
-        <Feather name={open ? "x" : "cpu"} size={22} color={colors.onPrimary} />
-      </TouchableOpacity>
     </View>
   );
 }
