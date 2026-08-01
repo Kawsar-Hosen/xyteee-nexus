@@ -1,0 +1,114 @@
+{
+  "theme": "Light Mode + Dark Mode toggle required",
+  "archetype": "5 (Luxury) applied to Material Design 3 paradigms",
+  "brand_name": "XYTEEE Nexus",
+  "typography": {
+    "headings": {
+      "font_family": "Playfair Display, serif",
+      "weights": ["400", "500", "600", "700"],
+      "usage": "Screen titles, display names, major section headers. Delivers a premium, editorial aesthetic."
+    },
+    "body": {
+      "font_family": "Outfit, sans-serif",
+      "weights": ["300", "400", "500"],
+      "usage": "Chat messages, bios, input fields, labels. Clean, geometric, and highly legible."
+    }
+  },
+  "color_palette": {
+    "light": {
+      "background": "#FAFAFA",
+      "foreground": "#0A0A0A",
+      "card": "#F0EFEA",
+      "card_foreground": "#0A0A0A",
+      "primary": "#9B6A38",
+      "primary_foreground": "#FAFAFA",
+      "secondary": "#E5E4E0",
+      "secondary_foreground": "#0A0A0A",
+      "accent": "#E5E4E0",
+      "accent_foreground": "#9B6A38",
+      "destructive": "#8A2C21",
+      "muted": "#E5E4E0",
+      "muted_foreground": "#6B6B75",
+      "border": "#DCDCD6",
+      "ring": "#9B6A38"
+    },
+    "dark": {
+      "background": "#070709",
+      "foreground": "#F1EFE7",
+      "card": "#121217",
+      "card_foreground": "#F1EFE7",
+      "primary": "#CFA876",
+      "primary_foreground": "#070709",
+      "secondary": "#1E1E24",
+      "secondary_foreground": "#F1EFE7",
+      "accent": "#2A2A35",
+      "accent_foreground": "#CFA876",
+      "destructive": "#933C31",
+      "muted": "#1E1E24",
+      "muted_foreground": "#8B8D98",
+      "border": "#2A2A35",
+      "ring": "#CFA876"
+    }
+  },
+  "spacing_and_layout": {
+    "global_wrapper": "Use responsive design. For web viewing, wrap the app in `w-full md:max-w-md md:mx-auto h-screen overflow-hidden relative shadow-2xl bg-background text-foreground` to simulate a pristine mobile app. Full width on actual mobile devices.",
+    "padding": "MD3 inspired generous padding. Use `p-4`, `p-6`, or `p-8` for screen containers.",
+    "border_radius": "MD3 large rounded corners. Use `rounded-3xl` for bottom sheets and major cards, `rounded-full` for avatars and pills.",
+    "grid_system": "Use flex layouts for chat lists and bento-grids (`grid-cols-2 gap-4`) for user profiles."
+  },
+  "navigation_pattern": {
+    "description": "Original UI Component: Reject standard 5-icon bottom tabs. Implement a 'Floating Dynamic Island' at the bottom of the screen.",
+    "floating_island": "A pill-shaped glassmorphic nav bar (`backdrop-blur-2xl bg-background/80 border border-border rounded-full px-6 py-4 mx-4 mb-6 shadow-lg`). Items: Feed, Search, Nexus (Center Action for New Chat/Story), Friends, Profile.",
+    "header": "Minimalist sticky header with MD3 typography. Use `backdrop-blur-xl` and `bg-background/80` for smooth scrolling underneath."
+  },
+  "component_strategies": {
+    "buttons": "MD3 Pill Buttons: Primary buttons use `rounded-full bg-primary text-primary-foreground` with a subtle elevation shadow. Hover/Active state adds a darker tonal layer.",
+    "inputs": "Filled Tonal Inputs (MD3 style): `bg-secondary text-foreground border-none rounded-2xl px-4 py-4 focus-visible:ring-2 focus-visible:ring-primary`.",
+    "chat_bubbles": "Original: Soft asymmetric bubbles. Sent: `bg-primary text-primary-foreground rounded-3xl rounded-br-sm`. Received: `bg-secondary text-secondary-foreground rounded-3xl rounded-bl-sm`. Padding `px-5 py-3`.",
+    "stories_carousel": "Editorial Cards: Instead of small circles, use tall vertical cards (`w-28 h-40 rounded-2xl`) with cinematic image overlays (`bg-black/40`). User's story has a primary colored '+' badge.",
+    "cards": "Elevated Surfaces: `bg-card rounded-3xl border border-border shadow-sm p-4`."
+  },
+  "motion_and_interactions": {
+    "library": "framer-motion",
+    "page_transitions": "Smooth animations required. Slide up with a slight scale-down of the background page (MD3 shared axis transition).",
+    "micro_interactions": "Tap states scale down (`active:scale-95`). Use smooth layout transitions for typing indicators and read receipts.",
+    "bottom_sheet": "MD3 Bottom Sheet architecture for settings, message actions, and story views. Draggable, rounded top corners (`rounded-t-3xl`), dims background to `bg-black/60`."
+  },
+  "media_and_assets": {
+    "icons": "lucide-react. Use thin, elegant strokes to contrast with the bold typography.",
+    "images": {
+      "auth_background": {
+        "url": "https://images.pexels.com/photos/13568041/pexels-photo-13568041.jpeg",
+        "description": "Fluid metallic waves, used as a premium background for the login/signup screens.",
+        "category": "background"
+      },
+      "avatar_1": {
+        "url": "https://images.unsplash.com/photo-1754473397061-e18dc1091855",
+        "description": "Stylish man with beard",
+        "category": "avatar"
+      },
+      "avatar_2": {
+        "url": "https://images.pexels.com/photos/9207417/pexels-photo-9207417.jpeg",
+        "description": "Elegant woman with hat",
+        "category": "avatar"
+      },
+      "story_cover": {
+        "url": "https://images.pexels.com/photos/10496918/pexels-photo-10496918.jpeg",
+        "description": "Emotional portrait",
+        "category": "story_image"
+      }
+    }
+  },
+  "testing": {
+    "requirements": "All interactive elements MUST include `data-testid` attributes (e.g., `data-testid=\"login-submit-button\"`, `data-testid=\"chat-send-action\"`)."
+  },
+  "instructions_to_main_agent": [
+    "Build 'XYTEEE Nexus' as a highly original social chat platform.",
+    "Implement a complete Dark and Light mode using the provided CSS variables/colors. Do NOT use default Tailwind blues or grays.",
+    "Apply 'Playfair Display' for Headings and 'Outfit' for Body text. Use standard web fonts imports.",
+    "Do NOT use standard bottom tabs. Implement the 'Floating Dynamic Island' navigation concept to satisfy the 'original navigation system' requirement.",
+    "Incorporate Material Design 3 concepts (large pill shapes, tonal surfaces, high elevation bottom sheets) but styled with the 'Luxury' archetype colors.",
+    "Ensure the application structure simulates a mobile app (`max-w-md mx-auto h-screen` wrapper) if running in a browser.",
+    "Develop real-time components (chat, typing indicators) with smooth framer-motion animations."
+  ]
+}

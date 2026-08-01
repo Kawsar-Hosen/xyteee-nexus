@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "512736799992",
+    "project_id": "xyteee-nexus",
+    "storage_bucket": "xyteee-nexus.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:512736799992:android:556df8e3a8fc9aa7f55f0d",
+        "android_client_info": {
+          "package_name": "com.xyteee.nexus"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCciobml4r-9ccejH1VA4REyWlX8yN8tWw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

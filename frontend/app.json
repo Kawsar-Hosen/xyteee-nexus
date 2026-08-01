@@ -1,0 +1,93 @@
+{
+  "expo": {
+    "name": "Nexus",
+    "slug": "xyteee-nexus",
+    "version": "3.9.1",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "xyteeenexus",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.xyteee.nexus",
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "Choose photos to share and post as stories",
+        "NSCameraUsageDescription": "Take photos for your profile and stories",
+        "NSMicrophoneUsageDescription": "Record voice messages in chat"
+      },
+      "bitcode": false
+    },
+    "android": {
+      "package": "com.xyteee.nexus",
+      "googleServicesFile": "./google-services.json",
+      "versionCode": 12900,
+      "softwareKeyboardLayoutMode": "resize",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "backgroundColor": "#070709"
+      },
+      "edgeToEdgeEnabled": true,
+      "permissions": [
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.VIBRATE",
+        "android.permission.WAKE_LOCK",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.INTERNET",
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.BLUETOOTH"
+      ]
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "favicon": "./assets/images/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Choose photos to share and post as stories"
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/notification-icon.png",
+          "color": "#D4A84F",
+          "defaultChannel": "default"
+        }
+      ],
+      "expo-audio",
+      "expo-video",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/icon.png",
+          "imageWidth": 180,
+          "resizeMode": "contain",
+          "backgroundColor": "#000000"
+        }
+      ],
+      "expo-asset",
+      "@config-plugins/react-native-webrtc"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "9ccc0437-b948-427d-af36-0c12307f209a"
+      }
+    },
+    "owner": "xytee"
+  }
+}
