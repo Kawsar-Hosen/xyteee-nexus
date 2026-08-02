@@ -289,7 +289,8 @@ export default function StoryCreate() {
       });
       setUploadStatus("success");
       setTimeout(() => router.back(), 900);
-    } catch (error) {
+    } catch (error: any) {
+      console.warn("[story] publish failed:", error?.message || error);
       setUploadStatus("failed");
     } finally {
       setBusy(false);
