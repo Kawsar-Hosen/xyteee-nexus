@@ -2,15 +2,19 @@ import { Platform } from "react-native";
 /**
  * XYTEEE Nexus API client.
  *
- * On web: uses a relative base URL so the reverse proxy (proxy.js on port
- * 5000) routes /api/* to the FastAPI backend — no cross-origin request needed.
+ * On web (Cloudflare Pages): uses EXPO_PUBLIC_BACKEND_URL directly —
+ * no proxy needed, CORS handled on backend.
  *
- * On native (iOS/Android): falls back to EXPO_PUBLIC_BACKEND_URL which must
- * point directly at the backend host.
+ * On web (local dev): falls back to relative URL for proxy.js.
+ *
+ * On native (iOS/Android): uses EXPO_PUBLIC_BACKEND_URL.
  */
 
 const isWeb = Platform.OS === "web";
-const BASE  = isWeb ? "" : (process.env.EXPO_PUBLIC_BACKEND_URL ?? "");
+const isProd = isWeb && typeof window !== "undefined" && !window.location.hostname.includes("localhost");
+const BASE = isWeb
+  ? (isProd ? (process.env.EXPO_PUBLIC_BACKEND_URL ?? "") : "")
+  : (process.env.EXPO_PUBLIC_BACKEND_URL ?? "");
 
 export const API_BASE = `${BASE}/api`;
 

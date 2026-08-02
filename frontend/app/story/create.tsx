@@ -25,6 +25,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useTheme } from "@/src/context/ThemeContext";
 import { useAuth } from "@/src/context/AuthContext";
 import { api } from "@/src/api/client";
+import { uploadFile } from "@/src/api/upload";
 import { NxText } from "@/src/components/NxText";
 import { fonts, radii, spacing } from "@/src/theme";
 
@@ -223,7 +224,6 @@ export default function StoryCreate() {
 
     const r = await ImagePicker.launchImageLibraryAsync({
       mediaTypes,
-      base64: type !== "video",
       quality: 0.82,
       videoMaxDuration: 300,
     });
@@ -247,14 +247,7 @@ export default function StoryCreate() {
     }
 
     setMediaKind(isVideo ? "video" : "image");
-
-    if (isVideo) {
-      setMedia(asset.uri);
-    } else if (asset.base64) {
-      setMedia(`data:image/jpeg;base64,${asset.base64}`);
-    } else {
-      setMedia(asset.uri);
-    }
+    setMedia(asset.uri);
   };
 
   const publish = async () => {
@@ -275,11 +268,12 @@ export default function StoryCreate() {
     setBusy(true);
     setUploadStatus("uploading");
     try {
+      const mediaUrl = await uploadFile(media, "stories", token);
       await api("/stories", {
         method: "POST",
         body: {
           kind: mediaKind,
-          media,
+          media: mediaUrl,
           caption,
           is_private: priv,
           text_x: finalTextPosition.x / SCREEN_W,

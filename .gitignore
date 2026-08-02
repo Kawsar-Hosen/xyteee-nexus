@@ -10,6 +10,10 @@ __pycache__/
 **/__pycache__/
 .expo/
 *.zip
+dist/
+**/dist/
+apk/
+**/apk/
 
 .local/
 

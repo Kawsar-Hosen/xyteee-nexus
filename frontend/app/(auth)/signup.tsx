@@ -233,6 +233,16 @@ export default function SignUp() {
             </NxText>
           </TouchableOpacity>
 
+          <TouchableOpacity
+            onPress={() => router.push("/settings/privacy-policy")}
+            style={{ alignItems: "center", paddingBottom: spacing.md }}
+          >
+            <NxText variant="bodySm" style={{ color: colors.mutedFg }}>
+              By continuing, you agree to our{" "}
+              <NxText style={{ color: colors.primary, fontFamily: fonts.bodySemi }}>Privacy Policy</NxText>
+            </NxText>
+          </TouchableOpacity>
+
           <View style={{ height: spacing.xl }} />
         </ScrollView>
       </KeyboardAvoidingView>

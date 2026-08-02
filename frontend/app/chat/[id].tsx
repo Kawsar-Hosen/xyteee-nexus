@@ -41,6 +41,7 @@ import { useTheme } from "@/src/context/ThemeContext";
 import { useAuth } from "@/src/context/AuthContext";
 import { useWs } from "@/src/context/WsContext";
 import { api } from "@/src/api/client";
+import { uploadFile } from "@/src/api/upload";
 import { NxText } from "@/src/components/NxText";
 import { Avatar } from "@/src/components/Avatar";
 import { VoiceBubble } from "@/src/components/VoiceBubble";
@@ -402,7 +403,6 @@ export default function ChatScreen() {
           ? ImagePicker.MediaTypeOptions.Images
           : ImagePicker.MediaTypeOptions.Videos,
       quality: 0.6,
-      base64: type === "image",
       allowsEditing: false,
     });
 
@@ -410,35 +410,22 @@ export default function ChatScreen() {
 
     const asset = result.assets[0];
 
-    if (type === "image") {
-      if (!asset.base64) return;
-
-      const dataUrl = `data:image/jpeg;base64,${asset.base64}`;
-
+    setSending(true);
+    try {
+      const url = await uploadFile(asset.uri, "chat", token!, asset.fileName || undefined);
       await api("/chats/message", {
         method: "POST",
         body: {
           conversation_id,
-          kind: "image",
-          media: dataUrl,
+          kind: type,
+          media: url,
           content: "",
         },
         token: token!,
       });
-
-      return;
+    } finally {
+      setSending(false);
     }
-
-    await api("/chats/message", {
-      method: "POST",
-      body: {
-        conversation_id,
-        kind: "video",
-        media: asset.uri,
-        content: "",
-      },
-      token: token!,
-    });
   };
 
   /* ── Voice recording ──────────────────────────────────────────────── */
@@ -457,26 +444,13 @@ export default function ChatScreen() {
     if (!result) return;
     setSending(true);
     try {
-      // Convert local audio file to base64 data URL so the recipient can play it.
-      // A raw local file:// URI is only accessible on the sender's device.
-      let mediaData: string = result.uri;
-      if (Platform.OS !== "web" && result.uri.startsWith("file://")) {
-        try {
-          const b64 = await FileSystem.readAsStringAsync(result.uri, {
-            encoding: FileSystem.EncodingType.Base64,
-          });
-          mediaData = `data:audio/m4a;base64,${b64}`;
-        } catch {
-          // fallback to raw uri if read fails (shouldn't normally happen)
-        }
-      }
-
+      const url = await uploadFile(result.uri, "voice", token!, `voice_${Date.now()}.m4a`);
       await api("/chats/message", {
         method: "POST",
         body: {
           conversation_id,
           kind: "voice",
-          media: mediaData,
+          media: url,
           content: result.durationStr,
         },
         token: token!,

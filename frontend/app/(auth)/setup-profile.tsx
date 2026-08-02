@@ -15,6 +15,7 @@ import { LinearGradient } from "expo-linear-gradient";
 
 import { useTheme } from "@/src/context/ThemeContext";
 import { useAuth } from "@/src/context/AuthContext";
+import { uploadFile } from "@/src/api/upload";
 import { NxText } from "@/src/components/NxText";
 import { Avatar } from "@/src/components/Avatar";
 import { fonts, radii, spacing } from "@/src/theme";
@@ -66,20 +67,19 @@ export default function SetupProfile() {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       quality: 0.5,
-      base64: true,
       aspect: target === "avatar" ? [1, 1] : [16, 9],
       allowsEditing: true,
     });
 
-    if (result.canceled || !result.assets?.[0]?.base64) return;
+    if (result.canceled || !result.assets?.[0]) return;
 
-    const uri = `data:image/jpeg;base64,${result.assets[0].base64}`;
-
-    if (target === "avatar") {
-      setAvatar(uri);
-    } else {
-      setCover(uri);
-    }
+    const asset = result.assets[0];
+    setSaving(true);
+    try {
+      const url = await uploadFile(asset.uri, "profiles", user?.user_id || "", asset.fileName || undefined);
+      if (target === "avatar") setAvatar(url);
+      else setCover(url);
+    } finally { setSaving(false); }
   };
 
   const continueToFeed = async () => {

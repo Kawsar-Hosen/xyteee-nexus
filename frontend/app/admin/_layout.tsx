@@ -9,7 +9,7 @@ import { useAuth } from "@/src/context/AuthContext";
 import { useTheme } from "@/src/context/ThemeContext";
 import { NxText } from "@/src/components/NxText";
 
-const ADMIN_EMAIL = "smdkawsar2@gmail.com";
+const ADMIN_EMAIL = process.env.EXPO_PUBLIC_ADMIN_EMAIL || "smdkawsar2@gmail.com";
 
 export default function AdminLayout() {
   const { user, loading } = useAuth();

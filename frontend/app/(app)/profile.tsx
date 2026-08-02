@@ -24,7 +24,7 @@ import { VerifiedBadge } from "@/src/components/VerifiedBadge";
 import { fonts, radii, spacing } from "@/src/theme";
 import { DOCK_PAD } from "@/src/theme/layout";
 
-const ADMIN_EMAIL = "smdkawsar2@gmail.com";
+const ADMIN_EMAIL = process.env.EXPO_PUBLIC_ADMIN_EMAIL || "smdkawsar2@gmail.com";
 const APP_VERSION = "1.0.0";
 const COVER_H = 230;
 const AVATAR_SIZE = 92;

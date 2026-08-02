@@ -50,6 +50,51 @@ SMTP_EMAIL = os.environ.get("SMTP_EMAIL", "")
 SMTP_APP_PASSWORD = os.environ.get("SMTP_APP_PASSWORD", "")
 SMTP_FROM_NAME = os.environ.get("SMTP_FROM_NAME", "XYTEEE Nexus")
 
+# ── Cloudflare R2 (S3-compatible) Storage ──────────────────────────────────────
+import boto3
+from fastapi import UploadFile, File as FastAPIFile
+
+R2_ACCOUNT_ID = os.environ.get("R2_ACCOUNT_ID", "")
+R2_ACCESS_KEY_ID = os.environ.get("R2_ACCESS_KEY_ID", "")
+R2_SECRET_ACCESS_KEY = os.environ.get("R2_SECRET_ACCESS_KEY", "")
+R2_BUCKET_NAME = os.environ.get("R2_BUCKET_NAME", "xyteee-media")
+R2_PUBLIC_URL = os.environ.get("R2_PUBLIC_URL", "")
+
+_r2_client = None
+_r2_initialized = False
+
+def _get_r2_client():
+    global _r2_client, _r2_initialized
+    if _r2_initialized:
+        return _r2_client
+    _r2_initialized = True
+    if (R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY and R2_ACCOUNT_ID
+            and "YOUR_" not in R2_ACCOUNT_ID):
+        _r2_client = boto3.client(
+            "s3",
+            endpoint_url=f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com",
+            aws_access_key_id=R2_ACCESS_KEY_ID,
+            aws_secret_access_key=R2_SECRET_ACCESS_KEY,
+            region_name="auto",
+        )
+    return _r2_client
+
+def _r2_available() -> bool:
+    return _get_r2_client() is not None
+
+def _r2_upload(data: bytes, key: str, content_type: str = "application/octet-stream") -> str:
+    """Upload bytes to R2 and return the public URL."""
+    client = _get_r2_client()
+    if not client:
+        raise RuntimeError("R2 storage not configured")
+    client.put_object(
+        Bucket=R2_BUCKET_NAME,
+        Key=key,
+        Body=data,
+        ContentType=content_type,
+    )
+    return f"{R2_PUBLIC_URL}/{key}"
+
 sb: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
 logging.basicConfig(
@@ -58,8 +103,67 @@ logging.basicConfig(
 )
 logger = logging.getLogger("xyteee")
 
+# ── Rate Limiting ────────────────────────────────────────────────────────────
+from collections import defaultdict
+import time as _time
+
+_rate_limit_store: Dict[str, List[float]] = defaultdict(list)
+RATE_LIMIT_WINDOW = 60  # seconds
+RATE_LIMIT_MAX_REQUESTS = 120  # per window per IP
+
+def _check_rate_limit(ip: str) -> bool:
+    now = _time.time()
+    _rate_limit_store[ip] = [t for t in _rate_limit_store[ip] if now - t < RATE_LIMIT_WINDOW]
+    if len(_rate_limit_store[ip]) >= RATE_LIMIT_MAX_REQUESTS:
+        return False
+    _rate_limit_store[ip].append(now)
+    return True
+
+# ── Response Cache ───────────────────────────────────────────────────────────
+_cache_store: Dict[str, Any] = {}
+CACHE_TTL = 30  # seconds
+
+def _cache_key(path: str, user_id: str) -> str:
+    return f"{user_id}:{path}"
+
+def _get_cached(key: str) -> Optional[Any]:
+    entry = _cache_store.get(key)
+    if entry and _time.time() - entry["ts"] < CACHE_TTL:
+        return entry["data"]
+    _cache_store.pop(key, None)
+    return None
+
+def _set_cached(key: str, data: Any) -> None:
+    _cache_store[key] = {"data": data, "ts": _time.time()}
+
+def _invalidate_user_cache(user_id: str) -> None:
+    keys_to_remove = [k for k in _cache_store if k.startswith(f"{user_id}:")]
+    for k in keys_to_remove:
+        _cache_store.pop(k, None)
+
+from starlette.datastructures import MutableHeaders
+from starlette.middleware.base import BaseHTTPMiddleware
+
 app = FastAPI(title="XYTEEE Nexus API")
 api = APIRouter(prefix="/api")
+
+
+# ── Rate Limit + Cache Middleware ──────────────────────────────────────────────
+class RateLimitCacheMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        ip = request.client.host if request.client else "unknown"
+        if not _check_rate_limit(ip):
+            from starlette.responses import JSONResponse
+            return JSONResponse(status_code=429, content={"error": "Too many requests. Please slow down."})
+
+        response = await call_next(request)
+
+        if request.method == "GET" and response.status_code == 200:
+            response.headers["cache-control"] = "private, max-age=30"
+
+        return response
+
+app.add_middleware(RateLimitCacheMiddleware)
 
 
 # ── DB helper ──────────────────────────────────────────────────────────────────
@@ -1357,6 +1461,29 @@ async def get_user(user_id: str, user=Depends(current_user)):
             u["birthday"] = None
 
     return u
+
+
+# ── File Upload (R2 Storage) ─────────────────────────────────────────────────
+@api.post("/upload")
+async def upload_file(
+    file: UploadFile = FastAPIFile(...),
+    kind: str = Query("general"),
+    user=Depends(current_user),
+):
+    """Upload a file to R2 and return its public URL."""
+    if not _r2_available():
+        raise HTTPException(status_code=503, detail="Storage not configured")
+
+    data = await file.read()
+    if len(data) > 20 * 1024 * 1024:  # 20 MB limit
+        raise HTTPException(status_code=413, detail="File too large (max 20 MB)")
+
+    ext = Path(file.filename or "file").suffix or ".bin"
+    key = f"{kind}/{user['user_id']}/{make_id('file')}{ext}"
+    content_type = file.content_type or "application/octet-stream"
+
+    url = _r2_upload(data, key, content_type)
+    return {"url": url, "key": key}
 
 
 @api.put("/users/me")
@@ -3583,7 +3710,7 @@ async def websocket_endpoint(ws: WebSocket, token: str):
 
 
 # ── Admin ──────────────────────────────────────────────────────────────────────
-ADMIN_EMAIL = "smdkawsar2@gmail.com"
+ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "smdkawsar2@gmail.com")
 
 # Optional: set ADMIN_USER_ID in environment to pin admin to a specific user_id.
 # This is the most stable/secure option. Get your user_id from /api/auth/me after

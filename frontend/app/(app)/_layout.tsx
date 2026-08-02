@@ -1,5 +1,5 @@
-import React, { useMemo } from "react";
-import { View, StyleSheet, TouchableOpacity, Platform } from "react-native";
+import React, { lazy, Suspense, useMemo } from "react";
+import { View, StyleSheet, TouchableOpacity, Platform, ActivityIndicator } from "react-native";
 import { Slot, usePathname, useRouter } from "expo-router";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { BlurView } from "expo-blur";
@@ -8,9 +8,10 @@ import Animated, { useAnimatedStyle, withSpring } from "react-native-reanimated"
 
 import { useTheme } from "@/src/context/ThemeContext";
 import { NxText } from "@/src/components/NxText";
-import { AIChatBox } from "@/src/components/AIChatBox";
 import { AIChatProvider } from "@/src/context/AIChatContext";
 import { spacing } from "@/src/theme";
+
+const AIChatBox = lazy(() => import("@/src/components/AIChatBox").then(m => ({ default: m.AIChatBox })));
 
 type Tab = { key: string; path: string; icon: keyof typeof Feather.glyphMap; label: string };
 
@@ -41,7 +42,9 @@ export default function AppLayout() {
       </View>
       {/* AI chat overlay — rendered above all content */}
       <View style={StyleSheet.absoluteFillObject} pointerEvents="box-none">
-        <AIChatBox />
+        <Suspense fallback={null}>
+          <AIChatBox />
+        </Suspense>
       </View>
       <SafeAreaView edges={["bottom"]} style={styles.dockWrap} pointerEvents="box-none">
         <View style={styles.dockShell} pointerEvents="box-none">
@@ -61,25 +64,51 @@ export default function AppLayout() {
                   onPress={() => router.replace(t.path as any)}
                   style={[
                     styles.dockItem,
-                    isCenter && { transform: [{ translateY: 0 }] },
+                    isCenter && styles.centerItem,
                   ]}
                 >
-                  <DockDot
-                    active={isActive}
-                    isCenter={isCenter}
-                    color={colors.primary}
-                    onPrimary={colors.onPrimary}
-                    fg={colors.foreground}
-                    muted={colors.mutedFg}
-                    icon={t.icon}
-                  />
-                  {!isCenter && (
-                    <NxText
-                      variant="caption"
-                      style={{ color: isActive ? colors.primary : colors.mutedFg, marginTop: 4 }}
+                  {isCenter ? (
+                    <DockDot
+                      active={isActive}
+                      isCenter={isCenter}
+                      color={colors.primary}
+                      onPrimary={colors.onPrimary}
+                      fg={colors.foreground}
+                      muted={colors.mutedFg}
+                      icon={t.icon}
+                    />
+                  ) : (
+                    <View
+                      style={[
+                        styles.tabPill,
+                        {
+                          backgroundColor: isActive ? colors.surfaceHigh : "transparent",
+                          borderColor: isActive ? `${colors.primary}22` : "transparent",
+                        },
+                      ]}
                     >
-                      {t.label}
-                    </NxText>
+                      <DockDot
+                        active={isActive}
+                        isCenter={isCenter}
+                        color={colors.primary}
+                        onPrimary={colors.onPrimary}
+                        fg={colors.foreground}
+                        muted={colors.mutedFg}
+                        icon={t.icon}
+                      />
+                      <NxText
+                        variant="caption"
+                        style={{ color: isActive ? colors.foreground : colors.mutedFg, marginTop: 3 }}
+                      >
+                        {t.label}
+                      </NxText>
+                      <View
+                        style={[
+                          styles.tabIndicator,
+                          { backgroundColor: isActive ? colors.primary : "transparent" },
+                        ]}
+                      />
+                    </View>
                   )}
                 </TouchableOpacity>
               );
@@ -149,16 +178,38 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: spacing.md,
-    paddingVertical: 8,
-    borderRadius: 30,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 10,
+    borderRadius: 32,
     borderWidth: 1,
     width: "100%",
     maxWidth: 420,
     overflow: "hidden",
+    shadowColor: "#000",
+    shadowOpacity: 0.14,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 12,
   },
-  dockItem: { flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 4 },
-  dot: { width: 44, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
+  dockItem: { flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 2 },
+  centerItem: { transform: [{ translateY: -8 }] },
+  tabPill: {
+    minWidth: 58,
+    paddingHorizontal: 8,
+    paddingTop: 6,
+    paddingBottom: 8,
+    borderRadius: 18,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  tabIndicator: {
+    width: 16,
+    height: 3,
+    borderRadius: 999,
+    marginTop: 6,
+  },
+  dot: { width: 42, height: 34, borderRadius: 18, alignItems: "center", justifyContent: "center" },
   centerWrap: {
     width: 48,
     height: 48,

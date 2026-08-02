@@ -1,6 +1,6 @@
 /**
  * Admin Panel — user management dashboard.
- * Only reachable by smdkawsar2@gmail.com (enforced by _layout.tsx + backend).
+ * Only reachable by admin email (enforced by _layout.tsx + backend).
  */
 import React, { useCallback, useEffect, useState } from "react";
 import {
