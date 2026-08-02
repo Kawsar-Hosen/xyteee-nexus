@@ -147,6 +147,10 @@ from starlette.middleware.base import BaseHTTPMiddleware
 app = FastAPI(title="XYTEEE Nexus API")
 api = APIRouter(prefix="/api")
 
+@api.get("/health")
+async def health():
+    return {"status": "ok"}
+
 
 # ── Rate Limit + Cache Middleware ──────────────────────────────────────────────
 class RateLimitCacheMiddleware(BaseHTTPMiddleware):
