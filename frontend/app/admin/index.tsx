@@ -156,6 +156,26 @@ export default function AdminPanel() {
               {loading ? <ActivityIndicator color={colors.primary} style={{ marginLeft: 10 }} /> : null}
             </View>
 
+            {/* Quick tools */}
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => router.push("/admin/reports")}
+              style={[styles.reportsCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
+            >
+              <View style={[styles.reportsIcon, { backgroundColor: "#E5484D1e" }]}>
+                <Feather name="flag" size={16} color="#E5484D" />
+              </View>
+              <View style={{ flex: 1, marginLeft: 12 }}>
+                <NxText variant="titleSm">Reports</NxText>
+                <NxText variant="caption" style={{ color: colors.mutedFg }}>
+                  Review community reports & moderate users
+                </NxText>
+              </View>
+              <View style={styles.rowChevron}>
+                <Feather name="chevron-right" size={18} color={colors.mutedFg} />
+              </View>
+            </TouchableOpacity>
+
             <View style={styles.sectionHead}>
               <NxText variant="titleSm">All Users</NxText>
               <NxText variant="caption" style={{ color: colors.mutedFg }}>
@@ -410,5 +430,21 @@ const styles = StyleSheet.create({
   },
   rowChevron: {
     marginLeft: 8,
+  },
+  reportsCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.md,
+    padding: 12,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+  },
+  reportsIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
   },
 });

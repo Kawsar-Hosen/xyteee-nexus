@@ -25,6 +25,10 @@ export type WsEvent =
       read_by_user_id?: string;
     }
   | { type: "message_delete"; message_id: string }
+  | { type: "message_pin"; message: any }
+  | { type: "chat_cleared"; conversation_id: string }
+  | { type: "conversation_deleted"; conversation_id: string; deleted_by: string }
+  | { type: "blocked"; by_user_id: string }
   | { type: "typing"; conversation_id: string; user_id: string; is_typing: boolean }
   | { type: "call_offer"; conversation_id: string; user_id: string; sdp: any }
   | { type: "call_answer"; conversation_id: string; user_id: string; sdp: any }

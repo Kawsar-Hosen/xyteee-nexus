@@ -8,3 +8,8 @@ declare module "react-native-incall-manager" {
 
   export default InCallManager;
 }
+
+declare module "*.wav" {
+  const src: number | string;
+  export default src;
+}

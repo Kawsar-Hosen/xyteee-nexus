@@ -12,6 +12,8 @@ import {
   Modal,
   Pressable,
   Keyboard,
+  Alert,
+  Linking,
   useWindowDimensions,
 } from "react-native";
 import Animated, {
@@ -36,12 +38,16 @@ import * as FileSystem from "expo-file-system/legacy";
 import dayjs from "dayjs";
 import * as Clipboard from "expo-clipboard";
 import { EmojiKeyboard } from "rn-emoji-keyboard";
+import * as Location from "expo-location";
 
 import { useTheme } from "@/src/context/ThemeContext";
 import { useAuth } from "@/src/context/AuthContext";
 import { useWs } from "@/src/context/WsContext";
 import { api } from "@/src/api/client";
 import { uploadFile } from "@/src/api/upload";
+import { playSendSound, playReceiveSound, playEmojiSound } from "@/src/utils/sounds";
+import { ChatSettingsPanel } from "@/src/components/ChatSettingsPanel";
+import { useChatSettings, CHAT_THEMES, CHAT_WALLPAPERS } from "@/src/hooks/useChatSettings";
 import { NxText } from "@/src/components/NxText";
 import { Avatar } from "@/src/components/Avatar";
 import { VoiceBubble } from "@/src/components/VoiceBubble";
@@ -68,6 +74,7 @@ type Msg = {
   deleted_for_everyone?: boolean;
   read_by?: string[];
   reactions?: Reaction[];
+  pinned_for?: string[];
   created_at: string;
 };
 
@@ -131,6 +138,8 @@ export default function ChatScreen() {
   );
   const [otherTyping, setOtherTyping] = useState(false);
   const [actionMsg, setActionMsg] = useState<Msg | null>(null);
+  const [showReactPicker, setShowReactPicker] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [searchQ, setSearchQ] = useState("");
   const [showAttachMenu, setShowAttachMenu] = useState(false);
@@ -187,6 +196,8 @@ export default function ChatScreen() {
     subscribe,
     send,
   });
+
+  const { settings: chatSettings } = useChatSettings(conversation_id);
 
   const load = useCallback(async () => {
     if (!token || !conversation_id) return;
@@ -259,6 +270,9 @@ export default function ChatScreen() {
             conversation_id,
             message_id: e.message.message_id,
           });
+          if (!chatSettings.muted && chatSettings.soundEnabled) {
+            playReceiveSound();
+          }
         }
 
         setMessages((prev) => {
@@ -296,6 +310,16 @@ export default function ChatScreen() {
         );
       } else if (e.type === "message_delete") {
         setMessages((prev) => prev.map((m) => (m.message_id === e.message_id ? { ...m, deleted_for_everyone: true, content: "", media: null, kind: "deleted" } : m)));
+      } else if (e.type === "message_pin" && e.message?.conversation_id === conversation_id) {
+        setMessages((prev) => prev.map((m) => (m.message_id === e.message.message_id ? e.message : m)));
+      } else if (e.type === "chat_cleared" && e.conversation_id === conversation_id) {
+        setMessages([]);
+      } else if (e.type === "conversation_deleted" && e.conversation_id === conversation_id) {
+        setMessages([]);
+        router.back();
+      } else if (e.type === "blocked" && e.by_user_id === other?.user_id) {
+        setMessages([]);
+        router.back();
       } else if (e.type === "typing" && e.conversation_id === conversation_id && e.user_id !== user?.user_id) {
         setOtherTyping(e.is_typing);
       } else if (e.type === "presence" && e.user_id === other?.user_id) {
@@ -311,7 +335,7 @@ export default function ChatScreen() {
         );
       }
     });
-  }, [subscribe, conversation_id, user, other?.user_id]);
+  }, [subscribe, conversation_id, user, other?.user_id, chatSettings.muted, chatSettings.soundEnabled]);
 
   useEffect(() => {
     if (!messages.length || loading) return;
@@ -372,6 +396,7 @@ export default function ChatScreen() {
     };
 
     setMessages((prev) => [...prev, optimisticMessage]);
+    playSendSound();
 
     try {
       const sent = await api<Msg>("/chats/message", {
@@ -427,6 +452,58 @@ export default function ChatScreen() {
     }
   };
 
+  /* ── Share live location ────────────────────────────────────────── */
+  const shareLocation = async () => {
+    setShowAttachMenu(false);
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert("Location permission", "Location access is needed to share your position.");
+        return;
+      }
+      const pos = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+      const { latitude, longitude } = pos.coords;
+      const content = JSON.stringify({
+        lat: Number(latitude.toFixed(6)),
+        lng: Number(longitude.toFixed(6)),
+      });
+
+      const body: any = { conversation_id, content, kind: "location" };
+      if (replyTo) body.reply_to = replyTo.message_id;
+
+      setReplyTo(null);
+      emitTyping(false);
+
+      const tempId = `temp-${Date.now()}`;
+      const optimisticMessage: any = {
+        message_id: tempId,
+        conversation_id,
+        sender_id: user?.user_id,
+        content,
+        kind: "location",
+        media: null,
+        created_at: new Date().toISOString(),
+        read_by: [user?.user_id].filter(Boolean),
+        reply_to: replyTo || null,
+        reactions: [],
+      };
+      setMessages((prev) => [...prev, optimisticMessage]);
+      playSendSound();
+
+      try {
+        const sent = await api<Msg>("/chats/message", { method: "POST", body, token: token! });
+        setMessages((prev) => prev.map((m) => (m.message_id === tempId ? sent : m)));
+      } catch {
+        setMessages((prev) => prev.filter((m) => m.message_id !== tempId));
+      }
+    } catch (e: any) {
+      if (e?.message?.includes("permission") || e?.code === "E_LOCATION_PERMISSION_DENIED") return;
+      Alert.alert("Couldn't get location", "Unable to access your location right now.");
+    }
+  };
+
   /* ── Voice recording ──────────────────────────────────────────────── */
   const handleMicPress = async () => {
     if (recState === "idle") {
@@ -472,6 +549,7 @@ export default function ChatScreen() {
     if (!actionMsg) return;
     const target = actionMsg;
     setActionMsg(null);
+    playEmojiSound();
     try {
       if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     } catch {}
@@ -487,10 +565,103 @@ export default function ChatScreen() {
     } catch {}
   };
 
+  const doPin = async (msg: Msg) => {
+    const myId = user?.user_id;
+    if (!myId) return;
+    setActionMsg(null);
+    const isPinned = (msg.pinned_for || []).includes(myId);
+    try {
+      const updated = await api<Msg>(`/chats/message/${msg.message_id}/pin`, {
+        method: "POST",
+        body: { pinned: !isPinned },
+        token: token!,
+      });
+      setMessages((prev) => prev.map((m) => (m.message_id === updated.message_id ? updated : m)));
+    } catch {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.message_id === msg.message_id
+            ? { ...m, pinned_for: isPinned ? (m.pinned_for || []).filter((id: string) => id !== myId) : [...(m.pinned_for || []), myId] }
+            : m
+        )
+      );
+    }
+  };
+
+  const handleClearChat = () => {
+    Alert.alert(
+      "Clear chat?",
+      "This deletes all messages on this device. The other person will not be affected.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Clear",
+          style: "destructive",
+          onPress: async () => {
+            setShowSettings(false);
+            try {
+              await api(`/chats/${conversation_id}/clear`, { method: "POST", token: token! });
+            } catch {}
+            setMessages([]);
+          },
+        },
+      ]
+    );
+  };
+
+  const handleDeleteConversation = () => {
+    Alert.alert(
+      "Delete conversation?",
+      "This chat will be removed from your conversations.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            setShowSettings(false);
+            try {
+              await api(`/chats/${conversation_id}/delete`, { method: "POST", token: token! });
+            } catch {}
+            setMessages([]);
+            router.back();
+          },
+        },
+      ]
+    );
+  };
+
+  const handleBlock = () => {
+    Alert.alert(
+      "Block user?",
+      `You will no longer receive messages or calls from ${other?.display_name || "this user"}.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Block",
+          style: "destructive",
+          onPress: async () => {
+            setShowSettings(false);
+            try {
+              if (other?.user_id) await api("/friends/block", { method: "POST", body: { user_id: other.user_id }, token: token! });
+            } catch {}
+            router.back();
+          },
+        },
+      ]
+    );
+  };
+
   const displayed = useMemo(() => {
-    if (!showSearch || !searchQ) return messages;
-    return messages.filter((m) => (m.content || "").toLowerCase().includes(searchQ.toLowerCase()));
+    const base = !showSearch || !searchQ ? messages : messages.filter((m) => (m.content || "").toLowerCase().includes(searchQ.toLowerCase()));
+    const pinned = base.filter((m) => (m.pinned_for?.length || 0) > 0);
+    const rest = base.filter((m) => !(m.pinned_for?.length || 0));
+    return [...pinned, ...rest];
   }, [messages, showSearch, searchQ]);
+
+  const chatBg = CHAT_WALLPAPERS[chatSettings.wallpaper]?.bg || "transparent";
+  const sentTheme = CHAT_THEMES[chatSettings.theme]?.sent;
+  const sentThemeFg = CHAT_THEMES[chatSettings.theme]?.sentFg;
 
   const lastSeen = other?.online
     ? "online"
@@ -749,7 +920,7 @@ export default function ChatScreen() {
               numberOfLines={1}
               style={{ color: otherTyping ? colors.primary : colors.mutedFg, fontSize: isNarrow ? 11 : 12, marginTop: 1 }}
             >
-              {otherTyping ? "typing…" : lastSeen}
+              {otherTyping && chatSettings.typingIndicator ? "typing…" : lastSeen}
             </NxText>
           </View>
         </TouchableOpacity>
@@ -772,8 +943,8 @@ export default function ChatScreen() {
             <Feather name="video" size={isNarrow ? 18 : 20} color={colors.foreground} />
           </TouchableOpacity>
 
-          <TouchableOpacity testID="chat-search-toggle" onPress={() => setShowSearch((s) => !s)} style={[styles.iconBtn, isNarrow && { width: 32, height: 36 }]}>
-            <Feather name="search" size={isNarrow ? 18 : 20} color={colors.foreground} />
+          <TouchableOpacity testID="chat-settings-toggle" onPress={() => setShowSettings(true)} style={[styles.iconBtn, isNarrow && { width: 32, height: 36 }]}>
+            <Feather name="sliders" size={isNarrow ? 18 : 20} color={colors.foreground} />
           </TouchableOpacity>
         </View>
       </View>
@@ -801,6 +972,7 @@ export default function ChatScreen() {
           ref={listRef}
           data={displayed}
           keyExtractor={(m) => m.message_id}
+          style={chatBg !== "transparent" ? { backgroundColor: chatBg } : undefined}
           contentContainerStyle={{
             paddingHorizontal: spacing.sm,
             paddingTop: spacing.md,
@@ -813,6 +985,9 @@ export default function ChatScreen() {
               onLongPress={() => setActionMsg(item)}
               replySource={item.reply_to ? messages.find((x) => x.message_id === item.reply_to) : undefined}
               other={other}
+              sentBg={sentTheme}
+              sentFg={sentThemeFg}
+              showReadReceipts={chatSettings.readReceipts}
             />
           )}
           keyboardShouldPersistTaps="handled"
@@ -894,6 +1069,17 @@ export default function ChatScreen() {
                     <Feather name="video" size={19} color={colors.foreground} />
                     <NxText style={{ marginLeft: 10, color: colors.foreground }}>
                       Video
+                    </NxText>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    testID="chat-attach-location"
+                    onPress={shareLocation}
+                    style={styles.attachOption}
+                  >
+                    <Feather name="map-pin" size={19} color={colors.foreground} />
+                    <NxText style={{ marginLeft: 10, color: colors.foreground }}>
+                      Location
                     </NxText>
                   </TouchableOpacity>
                 </View>
@@ -1065,29 +1251,28 @@ export default function ChatScreen() {
       ) : null}
 
       {/* ── Actions modal ─────────────────────────────────────────────── */}
-      <Modal visible={!!actionMsg} transparent animationType="fade" onRequestClose={() => setActionMsg(null)}>
+      <Modal visible={!!actionMsg && !showReactPicker} transparent animationType="fade" onRequestClose={() => setActionMsg(null)}>
         <Pressable style={styles.modalOverlay} onPress={() => setActionMsg(null)}>
-          <Animated.View
-            entering={ZoomIn.springify().damping(15).mass(0.6)}
-            exiting={ZoomOut.duration(120)}
-            style={[styles.reactionsBar, { backgroundColor: colors.surfaceHigh, borderColor: colors.border }]}
-          >
-            {REACTIONS.map((emoji, i) => (
+          <View style={[styles.reactionsBar, { backgroundColor: colors.surfaceHigh, borderColor: colors.border }]}>
+            {REACTIONS.map((emoji) => (
               <ReactionBubble
                 key={emoji}
                 emoji={emoji}
-                index={i}
                 selected={actionMsg?.reactions?.some((r) => r.user_id === user?.user_id && r.emoji === emoji) || false}
                 onPress={() => doReact(emoji)}
-                size={isNarrow ? 40 : 46}
               />
             ))}
-          </Animated.View>
+            <TouchableOpacity
+              testID="react-custom"
+              onPress={() => setShowReactPicker(true)}
+              activeOpacity={0.7}
+              style={[styles.reactionBubble, { width: 34, height: 34, borderRadius: 17 }, { backgroundColor: colors.accent }]}
+            >
+              <Feather name="plus" size={16} color={colors.foreground} />
+            </TouchableOpacity>
+          </View>
 
-          <Animated.View
-            entering={FadeIn.duration(180).delay(80)}
-            style={[styles.sheet, { backgroundColor: colors.surface, borderColor: colors.border }]}
-          >
+          <View style={[styles.sheet, { backgroundColor: colors.surface, borderColor: colors.border }]}>
             {actionMsg ? (
               <View style={[styles.sheetPreview, { backgroundColor: colors.surfaceHigh, borderColor: colors.border }]}>
                 <NxText variant="label" style={{ color: colors.mutedFg, marginBottom: 4 }}>Message</NxText>
@@ -1096,11 +1281,18 @@ export default function ChatScreen() {
                   numberOfLines={2}
                   style={{ color: colors.foreground, opacity: 0.85 }}
                 >
-                  {actionMsg.kind === "image" ? "📷 Photo" : actionMsg.kind === "voice" ? "🎙 Voice message" : actionMsg.content || ""}
+                  {actionMsg.kind === "image" ? "📷 Photo" : actionMsg.kind === "voice" ? "🎙 Voice message" : actionMsg.kind === "location" ? "📍 Shared location" : actionMsg.content || ""}
                 </NxText>
               </View>
             ) : null}
             <SheetAction icon="corner-up-left" label="Reply" onPress={() => { setReplyTo(actionMsg); setActionMsg(null); }} testID="msg-reply" />
+            <SheetAction
+              icon="map-pin"
+              label={actionMsg?.pinned_for?.includes(user?.user_id as string) ? "Unpin" : "Pin"}
+              tint={actionMsg?.pinned_for?.includes(user?.user_id as string) ? colors.primary : undefined}
+              onPress={() => { if (actionMsg) doPin(actionMsg); }}
+              testID="msg-pin"
+            />
             {actionMsg?.sender_id === user?.user_id && actionMsg?.kind === "text" && !actionMsg?.deleted_for_everyone ? (
               <SheetAction icon="edit-2" label="Edit" onPress={() => { setEditing(actionMsg); setText(actionMsg?.content || ""); setActionMsg(null); }} testID="msg-edit" />
             ) : null}
@@ -1111,9 +1303,45 @@ export default function ChatScreen() {
             {actionMsg?.sender_id === user?.user_id && !actionMsg?.deleted_for_everyone ? (
               <SheetAction icon="trash" label="Delete for everyone" tint={colors.danger} onPress={() => doDelete("everyone")} testID="msg-delete-all" />
             ) : null}
+          </View>
+        </Pressable>
+      </Modal>
+
+      {/* ── Custom emoji picker (reactions) ─────────────────────────────── */}
+      <Modal visible={showReactPicker} transparent animationType="fade" onRequestClose={() => setShowReactPicker(false)}>
+        <Pressable style={styles.modalOverlay} onPress={() => setShowReactPicker(false)}>
+          <Animated.View
+            entering={FadeInUp.duration(180)}
+            style={[styles.sheet, { backgroundColor: colors.surface, borderColor: colors.border, height: isShort ? 300 : 360 }]}
+          >
+            <NxText variant="label" style={{ paddingBottom: spacing.sm }}>Add a reaction</NxText>
+            <View style={{ flex: 1 }}>
+              <EmojiKeyboard
+                onEmojiSelected={(emoji) => {
+                  setShowReactPicker(false);
+                  if (actionMsg) doReact(emoji.emoji);
+                }}
+                enableSearchBar
+                enableRecentlyUsed
+                hideHeader
+              />
+            </View>
           </Animated.View>
         </Pressable>
       </Modal>
+
+      {/* ── Chat Settings ─────────────────────────────────────────────── */}
+      <ChatSettingsPanel
+        visible={showSettings}
+        onClose={() => setShowSettings(false)}
+        conversationId={conversation_id}
+        other={other}
+        messages={messages}
+        onSearch={() => setShowSearch(true)}
+        onClearChat={handleClearChat}
+        onDeleteConversation={handleDeleteConversation}
+        onBlock={handleBlock}
+      />
     </SafeAreaView>
   );
 }
@@ -1191,22 +1419,48 @@ function MessageBubble({
   onLongPress,
   replySource,
   other,
+  sentBg,
+  sentFg,
+  showReadReceipts = true,
 }: {
   m: Msg;
   isMe: boolean;
   onLongPress: () => void;
   replySource?: Msg;
   other?: any;
+  sentBg?: string;
+  sentFg?: string;
+  showReadReceipts?: boolean;
 }) {
   const { colors } = useTheme();
   const { width: screenWidth } = useWindowDimensions();
-  const bubbleBg = isMe ? colors.bubbleSent : colors.bubbleRecv;
-  const bubbleFg = isMe ? colors.bubbleSentFg : colors.bubbleRecvFg;
+  const bubbleBg = isMe ? sentBg || colors.bubbleSent : colors.bubbleRecv;
+  const bubbleFg = isMe ? sentFg || colors.bubbleSentFg : colors.bubbleRecvFg;
   const isDeleted = m.deleted_for_everyone || m.kind === "deleted";
   const isVoice = m.kind === "voice" && !!m.media;
   const isImage = m.kind === "image" && !!m.media;
+  const isLocation = m.kind === "location";
+  const loc = useMemo(() => {
+    if (!isLocation || !m.content) return null;
+    try {
+      const p = JSON.parse(m.content);
+      if (typeof p.lat === "number" && typeof p.lng === "number") return p as { lat: number; lng: number };
+    } catch {}
+    return null;
+  }, [isLocation, m.content]);
   const isRead = (m.read_by?.length || 0) > 1;
   const time = dayjs(m.created_at).format("HH:mm");
+  const [mapErr, setMapErr] = useState(false);
+
+  const openMapLink = () => {
+    if (!loc) return;
+    const url = `https://www.google.com/maps?q=${loc.lat},${loc.lng}`;
+    if (Platform.OS === "web" && typeof window !== "undefined") {
+      window.open(url, "_blank");
+    } else {
+      Linking.openURL(url).catch(() => {});
+    }
+  };
 
   // Responsive max bubble width: 78% of screen, capped at 320px
   const bubbleMaxWidth = Math.min(screenWidth * 0.78, 320);
@@ -1222,6 +1476,9 @@ function MessageBubble({
   // ── Meta row (time + read receipt) ──────────────────────────────────
   const MetaRow = () => (
     <View style={styles.msgMeta}>
+      {m.pinned_for?.length ? (
+        <Feather name="map-pin" size={10} color={bubbleFg} style={{ marginRight: 3, opacity: 0.8 }} />
+      ) : null}
       {m.edited ? (
         <NxText style={[styles.msgMetaText, { color: bubbleFg, opacity: 0.7, marginRight: 3 }]}>edited</NxText>
       ) : null}
@@ -1240,7 +1497,7 @@ function MessageBubble({
             { color: bubbleFg, opacity: isRead ? 0.95 : 0.55 },
           ]}
         >
-          {isRead ? "✓✓" : "✓"}
+          {showReadReceipts ? (isRead ? "✓✓" : "✓") : "✓"}
         </NxText>
       ) : null}
     </View>
@@ -1287,6 +1544,9 @@ function MessageBubble({
             } catch {}
             onLongPress();
           }}
+          onPress={() => {
+            if (isLocation && loc) openMapLink();
+          }}
           activeOpacity={0.82}
           testID={`msg-${m.message_id}`}
         >
@@ -1315,9 +1575,9 @@ function MessageBubble({
                 bubbleRadius,
                 {
                   backgroundColor: bubbleBg,
-                  paddingVertical: isImage ? 4 : 11,
-                  paddingHorizontal: isImage ? 4 : 15,
-                  ...(!isMe && !isImage && !isDeleted
+                  paddingVertical: isImage || isLocation ? 4 : 11,
+                  paddingHorizontal: isImage || isLocation ? 4 : 15,
+                  ...(!isMe && !isImage && !isDeleted && !isLocation
                     ? { borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border }
                     : {}),
                   ...(isImage
@@ -1352,6 +1612,8 @@ function MessageBubble({
                       ? "🎙 Voice message"
                       : replySource.kind === "image"
                       ? "📷 Photo"
+                      : replySource.kind === "location"
+                      ? "📍 Shared location"
                       : replySource.content
                       ? replySource.content.slice(0, 80)
                       : "Message"}
@@ -1377,6 +1639,57 @@ function MessageBubble({
                   resizeMode="cover"
                   style={{ width: imageSize, height: imageSize, borderRadius: 14 }}
                 />
+              ) : isLocation && loc ? (
+                <View style={{ borderRadius: 14, overflow: "hidden", width: imageSize }}>
+                  {mapErr ? (
+                    <View
+                      style={{
+                        height: 140,
+                        alignItems: "center",
+                        justifyContent: "center",
+                        backgroundColor: "rgba(0,0,0,0.05)",
+                      }}
+                    >
+                      <Feather name="map-pin" size={28} color={bubbleFg} style={{ opacity: 0.7 }} />
+                      <NxText style={{ marginTop: 6, fontSize: 11, color: bubbleFg, opacity: 0.7 }}>
+                        Shared location
+                      </NxText>
+                    </View>
+                  ) : (
+                    <Image
+                      source={{
+                        uri: `https://static-maps.yandex.ru/1.x/?ll=${loc.lng},${loc.lat}&z=15&size=600,400&l=map&pt=${loc.lng},${loc.lat},pm2rdl&lang=en_US`,
+                      }}
+                      resizeMode="cover"
+                      style={{ width: imageSize, height: 150 }}
+                      onError={() => setMapErr(true)}
+                    />
+                  )}
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      paddingHorizontal: 10,
+                      paddingVertical: 8,
+                      backgroundColor: "rgba(0,0,0,0.04)",
+                    }}
+                  >
+                    <Feather name="map-pin" size={12} color={bubbleFg} style={{ opacity: 0.8 }} />
+                    <NxText
+                      style={{
+                        flex: 1,
+                        marginLeft: 6,
+                        fontSize: 12.5,
+                        color: bubbleFg,
+                        fontFamily: fonts.bodySemi,
+                      }}
+                      numberOfLines={1}
+                    >
+                      {loc.lat.toFixed(5)}, {loc.lng.toFixed(5)}
+                    </NxText>
+                    <Feather name="external-link" size={13} color={bubbleFg} style={{ opacity: 0.7 }} />
+                  </View>
+                </View>
               ) : (
                 <NxText
                   style={{
@@ -1435,26 +1748,17 @@ function MessageBubble({
       </View>
   );
 }
-function ReactionBubble({ emoji, index, selected, onPress, size = 46 }: { emoji: string; index: number; selected: boolean; onPress: () => void; size?: number }) {
+function ReactionBubble({ emoji, selected, onPress }: { emoji: string; selected: boolean; onPress: () => void }) {
   const { colors } = useTheme();
-  const scale = useSharedValue(0);
-  useEffect(() => { scale.value = withDelay(index * 35, withSpring(1, { damping: 12, stiffness: 220 })); }, [index, scale]);
-  const style = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
-  const handlePress = () => {
-    scale.value = withSequence(withSpring(1.4, { damping: 10 }), withTiming(1, { duration: 120 }));
-    onPress();
-  };
   return (
-    <Animated.View style={style}>
-      <TouchableOpacity
-        testID={`react-${emoji}`}
-        onPress={handlePress}
-        activeOpacity={0.7}
-        style={[styles.reactionBubble, { width: size, height: size, borderRadius: size / 2 }, selected && { backgroundColor: colors.primary + "33", borderColor: colors.primary, borderWidth: 1 }]}
-      >
-        <NxText style={{ fontSize: size === 40 ? 23 : 26 }}>{emoji}</NxText>
-      </TouchableOpacity>
-    </Animated.View>
+    <TouchableOpacity
+      testID={`react-${emoji}`}
+      onPress={onPress}
+      activeOpacity={0.7}
+      style={[styles.reactionBubble, { width: 34, height: 34, borderRadius: 17 }, selected && { backgroundColor: colors.primary + "33", borderColor: colors.primary, borderWidth: 1 }]}
+    >
+      <NxText style={{ fontSize: 19 }}>{emoji}</NxText>
+    </TouchableOpacity>
   );
 }
 
@@ -1713,11 +2017,11 @@ const styles = StyleSheet.create({
   modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "flex-end" },
   reactionsBar: {
     flexDirection: "row", alignItems: "center", justifyContent: "space-around",
-    paddingHorizontal: 12, paddingVertical: 10, marginHorizontal: 20,
-    borderRadius: 40, borderWidth: 1, gap: 4,
+    paddingHorizontal: 8, paddingVertical: 6, marginHorizontal: 20, marginBottom: 14,
+    borderRadius: 24, borderWidth: 1, gap: 2,
     shadowColor: "#000", shadowOpacity: 0.35, shadowRadius: 20, shadowOffset: { width: 0, height: 8 }, elevation: 12,
   },
-  reactionBubble: { width: 46, height: 46, borderRadius: 23, alignItems: "center", justifyContent: "center" },
+  reactionBubble: { width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center" },
   reactionsRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 14, borderWidth: 1, gap: 6 },
   reactionChip: { flexDirection: "row", alignItems: "center", paddingHorizontal: 2 },
   sheet: { padding: spacing.lg, borderTopLeftRadius: 24, borderTopRightRadius: 24, borderWidth: 1 },

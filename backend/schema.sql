@@ -4,6 +4,7 @@
 
 -- ── Drop everything (CASCADE handles FK dependencies) ──────────────
 DROP TABLE IF EXISTS notifications   CASCADE;
+DROP TABLE IF EXISTS reports         CASCADE;
 DROP TABLE IF EXISTS stories         CASCADE;
 DROP TABLE IF EXISTS messages        CASCADE;
 DROP TABLE IF EXISTS conversations   CASCADE;
@@ -78,6 +79,7 @@ CREATE TABLE conversations (
   participants    TEXT[]      NOT NULL DEFAULT '{}',
   last_message    TEXT,
   last_message_at TIMESTAMPTZ DEFAULT NOW(),
+  deleted_for     TEXT[]      DEFAULT '{}',
   created_at      TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -97,6 +99,7 @@ CREATE TABLE messages (
   read_by              TEXT[]      DEFAULT '{}',
   delivered_to         TEXT[]      DEFAULT '{}',
   reactions            JSONB       DEFAULT '[]',
+  pinned_for           TEXT[]      DEFAULT '{}',
   created_at           TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -121,6 +124,20 @@ CREATE TABLE notifications (
   data       JSONB       DEFAULT '{}',
   read       BOOLEAN     DEFAULT FALSE,
   created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ── Reports ────────────────────────────────────────────────────────
+CREATE TABLE reports (
+  report_id       TEXT        PRIMARY KEY,
+  reporter_id     TEXT        NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+  reported_id     TEXT        NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+  conversation_id TEXT,
+  category        TEXT        NOT NULL,
+  description     TEXT        DEFAULT '',
+  status          TEXT        DEFAULT 'pending',   -- pending | actioned | dismissed
+  created_at      TIMESTAMPTZ DEFAULT NOW(),
+  resolved_at     TIMESTAMPTZ,
+  resolved_by     TEXT
 );
 
 -- ── Indexes ────────────────────────────────────────────────────────
@@ -148,6 +165,12 @@ CREATE INDEX idx_messages_deleted_for
 CREATE INDEX idx_messages_read_by
   ON messages USING GIN(read_by);
 
+CREATE INDEX idx_reports_status_created
+  ON reports(status, created_at DESC);
+
+CREATE INDEX idx_reports_reported
+  ON reports(reported_id, created_at DESC);
+
 -- ── Disable RLS (service-role key bypasses RLS anyway) ────────────
 ALTER TABLE users           DISABLE ROW LEVEL SECURITY;
 ALTER TABLE user_sessions   DISABLE ROW LEVEL SECURITY;
@@ -158,3 +181,4 @@ ALTER TABLE conversations   DISABLE ROW LEVEL SECURITY;
 ALTER TABLE messages        DISABLE ROW LEVEL SECURITY;
 ALTER TABLE stories         DISABLE ROW LEVEL SECURITY;
 ALTER TABLE notifications   DISABLE ROW LEVEL SECURITY;
+ALTER TABLE reports         DISABLE ROW LEVEL SECURITY;

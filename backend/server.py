@@ -1710,6 +1710,11 @@ async def block_user(body: FriendActionIn, user=Depends(current_user)):
     await run(lambda: sb.table("blocks").upsert({
         "blocker": user["user_id"], "blocked": body.user_id, "created_at": ts(now_utc()),
     }).execute())
+    # Realtime: notify the blocked user so their chat closes live.
+    await broadcast_to_user(body.user_id, {
+        "type": "blocked",
+        "by_user_id": user["user_id"],
+    })
     return {"ok": True}
 
 
@@ -1718,6 +1723,109 @@ async def unblock_user(body: FriendActionIn, user=Depends(current_user)):
     await run(lambda: sb.table("blocks").delete()
         .eq("blocker", user["user_id"]).eq("blocked", body.user_id).execute())
     return {"ok": True}
+
+
+# ── Chat actions (clear / delete / pin) ────────────────────────────────────────
+class ChatActionIn(BaseModel):
+    conversation_id: str
+
+
+class PinIn(BaseModel):
+    message_id: str
+    pinned: Optional[bool] = None  # omit to toggle
+
+
+@api.post("/chats/{conversation_id}/clear")
+async def clear_chat(conversation_id: str, user=Depends(current_user)):
+    """Delete all messages in this conversation for me (realtime, persisted)."""
+    me = user["user_id"]
+    cr = await run(lambda: sb.table("conversations").select("participants")
+        .eq("conversation_id", conversation_id).execute())
+    if not cr.data or me not in cr.data[0]["participants"]:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    msgs_r = await run(lambda: sb.table("messages").select("message_id,deleted_for")
+        .eq("conversation_id", conversation_id)
+        .eq("deleted_for_everyone", False)
+        .execute())
+    ids = [m["message_id"] for m in (msgs_r.data or []) if me not in (m.get("deleted_for") or [])]
+    if ids:
+        for mid in ids:
+            await run(lambda: sb.table("messages")
+                .update({"deleted_for": [me]})
+                .eq("message_id", mid).execute())
+
+    # Realtime: tell this user (and any of their devices) the chat was cleared.
+    await broadcast_to_user(me, {
+        "type": "chat_cleared",
+        "conversation_id": conversation_id,
+    })
+    return {"ok": True, "cleared": len(ids)}
+
+
+@api.post("/chats/{conversation_id}/delete")
+async def delete_conversation(conversation_id: str, user=Depends(current_user)):
+    """Remove this conversation for me (realtime, persisted)."""
+    me = user["user_id"]
+    cr = await run(lambda: sb.table("conversations").select("participants,deleted_for")
+        .eq("conversation_id", conversation_id).execute())
+    if not cr.data or me not in cr.data[0]["participants"]:
+        raise HTTPException(status_code=404, detail="Not found")
+    conv = cr.data[0]
+
+    new_df = list(set((conv.get("deleted_for") or []) + [me]))
+    await run(lambda: sb.table("conversations")
+        .update({"deleted_for": new_df})
+        .eq("conversation_id", conversation_id).execute())
+
+    # Also hide all messages for me
+    msgs_r = await run(lambda: sb.table("messages").select("message_id,deleted_for")
+        .eq("conversation_id", conversation_id).execute())
+    for m in (msgs_r.data or []):
+        ndf = list(set((m.get("deleted_for") or []) + [me]))
+        if ndf != (m.get("deleted_for") or []):
+            await run(lambda: sb.table("messages")
+                .update({"deleted_for": ndf})
+                .eq("message_id", m["message_id"]).execute())
+
+    await broadcast_to_user(me, {
+        "type": "conversation_deleted",
+        "conversation_id": conversation_id,
+        "deleted_by": me,
+    })
+    return {"ok": True}
+
+
+@api.post("/chats/message/{message_id}/pin")
+async def pin_message(message_id: str, body: PinIn, user=Depends(current_user)):
+    """Pin/unpin a message (toggles if `pinned` omitted)."""
+    me = user["user_id"]
+    mr = await run(lambda: sb.table("messages").select("*").eq("message_id", message_id).execute())
+    if not mr.data:
+        raise HTTPException(status_code=404, detail="Message not found")
+    msg = mr.data[0]
+
+    cr = await run(lambda: sb.table("conversations").select("participants")
+        .eq("conversation_id", msg["conversation_id"]).execute())
+    if not cr.data or me not in cr.data[0]["participants"]:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    cur = list(set(msg.get("pinned_for") or []))
+    pinned = cur if body.pinned is None else bool(body.pinned)
+    if me in cur:
+        new_pf = [p for p in cur if p != me] if pinned is not True else cur
+    else:
+        new_pf = cur + [me] if pinned is not False else cur
+
+    await run(lambda: sb.table("messages")
+        .update({"pinned_for": new_pf})
+        .eq("message_id", message_id).execute())
+
+    updated_r = await run(lambda: sb.table("messages").select("*").eq("message_id", message_id).execute())
+    updated = updated_r.data[0]
+    for p in cr.data[0]["participants"]:
+        await broadcast_to_user(p, {"type": "message_pin", "message": updated})
+    return updated
 
 
 @api.get("/friends")
@@ -2877,6 +2985,8 @@ async def list_chats(user=Depends(current_user)):
     other_user_ids = []
     seen_other: set = set()
     for c in r.data:
+        if me in (c.get("deleted_for") or []):
+            continue
         other_ids = [p for p in c["participants"] if p != me]
         if not other_ids:
             continue
@@ -3025,6 +3135,7 @@ async def send_message(body: MessageIn, user=Depends(current_user)):
         "read_by": [user["user_id"]],
         "delivered_to": conv["participants"],
         "reactions": [],
+        "pinned_for": [],
         "created_at": ts(now_utc()),
     }
     await run(lambda: sb.table("messages").insert(msg).execute())
@@ -3750,6 +3861,30 @@ PREMIUM_MIGRATION_SQL = (
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_animation_expires_at TIMESTAMPTZ DEFAULT NULL;"
 )
 
+REPORTS_MIGRATION_SQL = (
+    "CREATE TABLE IF NOT EXISTS reports (\n"
+    "  report_id       TEXT        PRIMARY KEY,\n"
+    "  reporter_id     TEXT        NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,\n"
+    "  reported_id     TEXT        NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,\n"
+    "  conversation_id TEXT,\n"
+    "  category        TEXT        NOT NULL,\n"
+    "  description     TEXT        DEFAULT '',\n"
+    "  status          TEXT        DEFAULT 'pending',\n"
+    "  created_at      TIMESTAMPTZ DEFAULT NOW(),\n"
+    "  resolved_at     TIMESTAMPTZ,\n"
+    "  resolved_by     TEXT\n"
+    ");\n"
+    "CREATE INDEX IF NOT EXISTS idx_reports_status_created\n"
+    "  ON reports(status, created_at DESC);\n"
+    "CREATE INDEX IF NOT EXISTS idx_reports_reported\n"
+    "  ON reports(reported_id, created_at DESC);"
+)
+
+CHATS_MIGRATION_SQL = (
+    "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS deleted_for TEXT[] DEFAULT '{}';\n"
+    "ALTER TABLE messages ADD COLUMN IF NOT EXISTS pinned_for TEXT[] DEFAULT '{}';"
+)
+
 # Becomes False at startup if the premium columns have not been migrated yet,
 # so the rest of the app keeps working until the admin runs PREMIUM_MIGRATION_SQL.
 _PREMIUM_COLS = True
@@ -3996,6 +4131,64 @@ ADMIN_MODERATION_REASONS = {
 class AdminModerationBody(BaseModel):
     reason_code: Optional[str] = None
     custom_reason: Optional[str] = None
+
+
+# ── Reports ─────────────────────────────────────────────────────────────────────
+REPORT_CATEGORIES = {
+    "spam": "Spam or scam",
+    "harassment": "Harassment or bullying",
+    "hate": "Hate speech",
+    "nudity": "Nudity or sexual content",
+    "violence": "Violence or threats",
+    "impersonation": "Impersonation or fake account",
+    "dangerous": "Dangerous or illegal activity",
+    "other": "Something else",
+}
+
+
+class ReportBody(BaseModel):
+    reported_id: str
+    category: str
+    description: Optional[str] = ""
+    conversation_id: Optional[str] = None
+
+
+@api.post("/reports", tags=["Reports"])
+async def create_report(body: ReportBody, user=Depends(current_user)):
+    """File a report against another user. Admins can review these."""
+    reporter = user["user_id"]
+    reported = body.reported_id.strip()
+
+    if reported == reporter:
+        raise HTTPException(status_code=400, detail="You cannot report yourself")
+
+    category = (body.category or "").strip()
+    if category not in REPORT_CATEGORIES:
+        raise HTTPException(status_code=400, detail="Invalid report category")
+
+    ur = await run(lambda: sb.table("users").select("user_id").eq("user_id", reported).execute())
+    if not ur.data:
+        raise HTTPException(status_code=404, detail="Reported user not found")
+
+    report = {
+        "report_id": f"rpt_{uuid.uuid4().hex}",
+        "reporter_id": reporter,
+        "reported_id": reported,
+        "conversation_id": (body.conversation_id or "").strip() or None,
+        "category": category,
+        "description": (body.description or "").strip(),
+        "status": "pending",
+        "created_at": ts(now_utc()),
+    }
+
+    await run(lambda: sb.table("reports").insert(report).execute())
+
+    return {
+        "ok": True,
+        "report_id": report["report_id"],
+        "status": "pending",
+        "message": "Thank you. We have received your report and will review it.",
+    }
 
 
 async def admin_moderate_user(
@@ -4266,6 +4459,82 @@ async def admin_get_user_moderation(
     return {"moderation": r.data[0]}
 
 
+# ── Admin: Reports ─────────────────────────────────────────────────────────────
+class ReportStatusBody(BaseModel):
+    status: str  # actioned | dismissed
+
+
+@api.get("/admin/reports", tags=["Admin Reports"])
+async def admin_list_reports(
+    status: Optional[str] = Query(None),
+    _admin: dict = Depends(require_admin),
+):
+    """List user reports. ?status=pending|actioned|dismissed filters."""
+    q = sb.table("reports").select("*")
+    if status:
+        if status not in {"pending", "actioned", "dismissed"}:
+            raise HTTPException(status_code=400, detail="Invalid status filter")
+        q = q.eq("status", status)
+    r = await run(lambda: q.order("created_at", desc=True).limit(200).execute())
+    reports = r.data or []
+
+    # Batch fetch reporter + reported users
+    ids = set()
+    for rep in reports:
+        ids.add(rep.get("reporter_id"))
+        ids.add(rep.get("reported_id"))
+    ids.discard(None)
+
+    umap: dict = {}
+    if ids:
+        ur = await run(lambda: sb.table("users").select("*").in_("user_id", list(ids)).execute())
+        umap = {u["user_id"]: u for u in (ur.data or [])}
+
+    for rep in reports:
+        rep["reporter"] = public_user(umap.get(rep.get("reporter_id")))
+        rep["reported"] = public_user(umap.get(rep.get("reported_id")))
+
+    return {
+        "reports": reports,
+        "total": len(reports),
+        "pending_count": sum(1 for x in reports if x.get("status") == "pending"),
+    }
+
+
+@api.put("/admin/reports/{report_id}", tags=["Admin Reports"])
+async def admin_update_report(
+    report_id: str,
+    body: ReportStatusBody,
+    admin: dict = Depends(require_admin),
+):
+    """Mark a report as actioned or dismissed."""
+    if body.status not in {"actioned", "dismissed"}:
+        raise HTTPException(status_code=400, detail="Invalid status")
+
+    r = await run(lambda: sb.table("reports").select("report_id").eq("report_id", report_id).execute())
+    if not r.data:
+        raise HTTPException(status_code=404, detail="Report not found")
+
+    await run(
+        lambda: sb.table("reports")
+        .update({
+            "status": body.status,
+            "resolved_at": ts(now_utc()),
+            "resolved_by": admin["user_id"],
+        })
+        .eq("report_id", report_id)
+        .execute()
+    )
+
+    return {"ok": True, "report_id": report_id, "status": body.status}
+
+
+@api.get("/reports/reasons", tags=["Reports"])
+async def report_reasons(user=Depends(current_user)):
+    """Expose the report categories so the app can render them."""
+    return {"reasons": REPORT_CATEGORIES}
+
+
 # ── Startup ────────────────────────────────────────────────────────────────────
 @app.on_event("startup")
 async def startup():
@@ -4303,6 +4572,25 @@ async def startup():
             "For stronger binding set ADMIN_USER_ID=<your_user_id> in .env "
             "(get it from GET /api/auth/me after logging in).",
             ADMIN_EMAIL,
+        )
+    # Ensure reports table exists
+    try:
+        await run(lambda: sb.table("reports").select("report_id").limit(1).execute())
+        logger.info("reports table ✅")
+    except Exception:
+        logger.warning(
+            "⚠️  reports table missing. Run in Supabase SQL Editor:\n%s",
+            REPORTS_MIGRATION_SQL,
+        )
+    # Ensure chat realtime columns exist (conversations.deleted_for, messages.pinned_for)
+    try:
+        await run(lambda: sb.table("conversations").select("deleted_for").limit(1).execute())
+        await run(lambda: sb.table("messages").select("pinned_for").limit(1).execute())
+        logger.info("chat realtime columns ✅")
+    except Exception:
+        logger.warning(
+            "⚠️  chat realtime columns missing. Run in Supabase SQL Editor:\n%s",
+            CHATS_MIGRATION_SQL,
         )
     logger.info("XYTEEE Nexus API ready — Supabase backend")
 

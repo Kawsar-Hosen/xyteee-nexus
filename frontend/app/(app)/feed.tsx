@@ -261,7 +261,10 @@ export default function Feed() {
         e.type === "message_edit" ||
         e.type === "message_delete" ||
         e.type === "story_new" ||
-        e.type === "notification"
+        e.type === "notification" ||
+        e.type === "conversation_deleted" ||
+        e.type === "chat_cleared" ||
+        e.type === "blocked"
       ) {
         load();
       }
