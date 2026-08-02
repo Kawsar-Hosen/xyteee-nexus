@@ -45,7 +45,6 @@ import { uploadFile } from "@/src/api/upload";
 import { NxText } from "@/src/components/NxText";
 import { Avatar } from "@/src/components/Avatar";
 import { VoiceBubble } from "@/src/components/VoiceBubble";
-import { LinearGradient } from "expo-linear-gradient";
 import { useVoiceRecorder } from "@/src/hooks/useVoiceRecorder";
 import { usePrivateVoiceCall, formatCallDuration } from "@/src/hooks/usePrivateVoiceCall";
 import { usePrivateVideoCall } from "@/src/hooks/usePrivateVideoCall";
@@ -1089,7 +1088,18 @@ export default function ChatScreen() {
             entering={FadeIn.duration(180).delay(80)}
             style={[styles.sheet, { backgroundColor: colors.surface, borderColor: colors.border }]}
           >
-            <NxText variant="label" style={{ paddingBottom: spacing.sm }}>Message</NxText>
+            {actionMsg ? (
+              <View style={[styles.sheetPreview, { backgroundColor: colors.surfaceHigh, borderColor: colors.border }]}>
+                <NxText variant="label" style={{ color: colors.mutedFg, marginBottom: 4 }}>Message</NxText>
+                <NxText
+                  variant="bodySm"
+                  numberOfLines={2}
+                  style={{ color: colors.foreground, opacity: 0.85 }}
+                >
+                  {actionMsg.kind === "image" ? "📷 Photo" : actionMsg.kind === "voice" ? "🎙 Voice message" : actionMsg.content || ""}
+                </NxText>
+              </View>
+            ) : null}
             <SheetAction icon="corner-up-left" label="Reply" onPress={() => { setReplyTo(actionMsg); setActionMsg(null); }} testID="msg-reply" />
             {actionMsg?.sender_id === user?.user_id && actionMsg?.kind === "text" && !actionMsg?.deleted_for_everyone ? (
               <SheetAction icon="edit-2" label="Edit" onPress={() => { setEditing(actionMsg); setText(actionMsg?.content || ""); setActionMsg(null); }} testID="msg-edit" />
@@ -1218,10 +1228,7 @@ function MessageBubble({
       <NxText
         style={[
           styles.msgMetaText,
-          {
-            color: isMe ? "rgba(255,255,255,0.65)" : bubbleFg,
-            opacity: isMe ? 0.9 : 0.72,
-          },
+          { color: bubbleFg, opacity: 0.7 },
         ]}
       >
         {time}
@@ -1230,10 +1237,7 @@ function MessageBubble({
         <NxText
           style={[
             styles.msgMetaTick,
-            {
-              color: isRead ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.65)",
-              opacity: isMe ? 0.45 : 1,
-            },
+            { color: bubbleFg, opacity: isRead ? 0.95 : 0.55 },
           ]}
         >
           {isRead ? "✓✓" : "✓"}
@@ -1242,17 +1246,17 @@ function MessageBubble({
     </View>
   );
 
-  // Bubble tail shape: sent → bottom-right corner flat, recv → bottom-left flat
+  // Clean ChatGPT-style radius: 18 with a small tail on the sender side
   const bubbleRadius = isMe
-    ? { borderRadius: 24, borderBottomRightRadius: 6 }
-    : { borderRadius: 20, borderBottomLeftRadius: 4 };
+    ? { borderTopLeftRadius: 18, borderTopRightRadius: 18, borderBottomLeftRadius: 18, borderBottomRightRadius: 6 }
+    : { borderTopLeftRadius: 18, borderTopRightRadius: 18, borderBottomLeftRadius: 6, borderBottomRightRadius: 18 };
 
   return (
     <View
       style={[
         styles.msgRow,
         isMe ? styles.msgRowMe : styles.msgRowThem,
-        { marginBottom: groupedList.length > 0 ? 16 : 6 },
+        { marginBottom: groupedList.length > 0 ? 16 : 8 },
       ]}
     >
       {/* ── Avatar for received messages ── */}
@@ -1275,22 +1279,6 @@ function MessageBubble({
           entering={isMe ? FadeInUp.duration(180) : undefined}
           style={{ maxWidth: bubbleMaxWidth, alignItems: isMe ? "flex-end" : "flex-start" }}
         >
-          {!isMe && !isDeleted && (
-          <NxText
-            variant="caption"
-            numberOfLines={1}
-            style={{
-              color: colors.primary,
-              fontFamily: fonts.bodySemi,
-              marginLeft: 2,
-              marginBottom: 3,
-              fontSize: 12,
-              letterSpacing: 0.3,
-            }}
-          >
-            {other?.display_name || "Nexus User"}
-          </NxText>
-        )}
         <TouchableOpacity
           onLongPress={() => {
             try {
@@ -1304,26 +1292,20 @@ function MessageBubble({
         >
           {/* ── Voice bubble ── */}
           {isVoice ? (
-            <View>
+            <View
+              style={[
+                styles.bubble,
+                bubbleRadius,
+                { backgroundColor: bubbleBg, paddingHorizontal: 8, paddingVertical: 8 },
+              ]}
+            >
               <VoiceBubble
                 mediaUri={m.media!}
                 duration={m.content}
                 messageId={m.message_id}
                 isMe={isMe}
               />
-              <View style={[styles.msgMeta, { marginHorizontal: 6, marginTop: 4 }]}>
-                <NxText style={[styles.msgMetaText, { color: colors.mutedFg }]}>{time}</NxText>
-                {isMe ? (
-                  <NxText
-                    style={[
-                      styles.msgMetaTick,
-                      { color: isRead ? colors.primary : colors.mutedFg },
-                    ]}
-                  >
-                    {isRead ? "✓✓" : "✓"}
-                  </NxText>
-                ) : null}
-              </View>
+              <MetaRow />
             </View>
           ) : (
             /* ── Text / image bubble ── */
@@ -1334,7 +1316,7 @@ function MessageBubble({
                 {
                   backgroundColor: bubbleBg,
                   paddingVertical: isImage ? 4 : 11,
-                  paddingHorizontal: isImage ? 4 : 16,
+                  paddingHorizontal: isImage ? 4 : 15,
                   ...(!isMe && !isImage && !isDeleted
                     ? { borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border }
                     : {}),
@@ -1342,33 +1324,22 @@ function MessageBubble({
                     ? {}
                     : isMe
                       ? (Platform.OS === "web"
-                        ? { boxShadow: `0px 6px 20px rgba(91,140,255,0.40)` } as any
-                        : { shadowColor: "#3F73FF", shadowOpacity: 0.30, shadowRadius: 14, shadowOffset: { width: 0, height: 5 }, elevation: 5 }
+                        ? { boxShadow: `0px 4px 16px rgba(0,0,0,0.18)` } as any
+                        : { shadowColor: "#000", shadowOpacity: 0.15, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 3 }
                       )
-                      : (Platform.OS === "web"
-                        ? { boxShadow: `0px 2px 8px rgba(0,0,0,0.10)` } as any
-                        : { shadowColor: "#000", shadowOpacity: 0.08, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 2 }
-                      )),
+                      : {}),
                 },
               ]}
             >
-              {isMe && !isImage && !isDeleted ? (
-                <LinearGradient
-                  colors={["#5B8CFF", "#3F73FF"]}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={StyleSheet.absoluteFillObject}
-                />
-              ) : null}
               {/* Reply preview */}
               {replySource ? (
                 <View
                   style={[
                     styles.replyPreview,
                     {
-                      borderLeftColor: isMe ? "rgba(255,255,255,0.5)" : colors.primary,
+                      borderLeftColor: isMe ? "rgba(0,0,0,0.4)" : colors.primary,
                       backgroundColor: isMe
-                        ? "rgba(255,255,255,0.18)"
+                        ? "rgba(0,0,0,0.06)"
                         : colors.primary + "18",
                     },
                   ]}
@@ -1409,10 +1380,10 @@ function MessageBubble({
               ) : (
                 <NxText
                   style={{
-                    color: isMe ? "#FFFFFF" : bubbleFg,
+                    color: bubbleFg,
                     fontSize: 15,
                     lineHeight: 22,
-                    fontFamily: isMe ? fonts.bodySemi : fonts.body,
+                    fontFamily: isMe ? fonts.bodyMedium : fonts.body,
                   }}
                 >
                   {m.content}
@@ -1434,7 +1405,7 @@ function MessageBubble({
               {
                 backgroundColor: colors.surfaceHigh,
                 borderColor: colors.border,
-                marginTop: -8,
+                marginTop: 6,
                 alignSelf: isMe ? "flex-end" : "flex-start",
                 marginRight: isMe ? 6 : 0,
                 marginLeft: isMe ? 0 : 6,
@@ -1491,7 +1462,9 @@ function SheetAction({ icon, label, onPress, testID, tint }: any) {
   const { colors } = useTheme();
   return (
     <TouchableOpacity testID={testID} onPress={onPress} activeOpacity={0.8} style={styles.sheetItem}>
-      <Feather name={icon} size={18} color={tint || colors.foreground} />
+      <View style={[styles.sheetIcon, { backgroundColor: tint ? colors.danger + "1A" : colors.accent }]}>
+        <Feather name={icon} size={18} color={tint || colors.foreground} />
+      </View>
       <NxText style={{ marginLeft: 12, color: tint || colors.foreground, fontFamily: fonts.bodyMedium }}>{label}</NxText>
     </TouchableOpacity>
   );
@@ -1748,7 +1721,9 @@ const styles = StyleSheet.create({
   reactionsRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 14, borderWidth: 1, gap: 6 },
   reactionChip: { flexDirection: "row", alignItems: "center", paddingHorizontal: 2 },
   sheet: { padding: spacing.lg, borderTopLeftRadius: 24, borderTopRightRadius: 24, borderWidth: 1 },
-  sheetItem: { flexDirection: "row", alignItems: "center", paddingVertical: 14 },
+  sheetPreview: { borderRadius: 14, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 12, marginBottom: 8 },
+  sheetIcon: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center" },
+  sheetItem: { flexDirection: "row", alignItems: "center", paddingVertical: 12 },
   recordingBar: {
     flex: 1,
     height: 42,
