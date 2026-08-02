@@ -7,7 +7,7 @@
       "developmentClient": true,
       "distribution": "internal",
       "env": {
-        "EXPO_PUBLIC_BACKEND_URL": "https://xyteee-nexus-xba0.onrender.com"
+        "EXPO_PUBLIC_BACKEND_URL": "https://xyteee-nexus-api-production-b105.up.railway.app"
       },
       "android": {
         "buildType": "apk"
@@ -16,7 +16,7 @@
     "preview": {
       "distribution": "internal",
       "env": {
-        "EXPO_PUBLIC_BACKEND_URL": "https://xyteee-nexus-xba0.onrender.com"
+        "EXPO_PUBLIC_BACKEND_URL": "https://xyteee-nexus-api-production-b105.up.railway.app"
       },
       "android": {
         "buildType": "apk"
@@ -27,7 +27,7 @@
     },
     "production": {
       "env": {
-        "EXPO_PUBLIC_BACKEND_URL": "https://xyteee-nexus-xba0.onrender.com"
+        "EXPO_PUBLIC_BACKEND_URL": "https://xyteee-nexus-api-production-b105.up.railway.app"
       },
       "android": {
         "buildType": "app-bundle"
