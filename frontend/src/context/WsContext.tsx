@@ -3,10 +3,14 @@ import React, { createContext, useContext, useEffect, useRef, useState, useCallb
 
 import { useAuth } from "@/src/context/AuthContext";
 
-// On web the proxy (port 5000) routes /api/ws to the backend — use relative.
-// On native use the explicit backend URL env var.
+// On web: production (Cloudflare Pages) has no backend — point WebSockets at the
+// explicit backend URL, same as the REST client. Local web goes through the proxy
+// (port 5000), so use a relative /api/ws. On native use the backend URL env var.
 const isWeb = Platform.OS === "web";
-const BASE  = isWeb ? "" : (process.env.EXPO_PUBLIC_BACKEND_URL ?? "");
+const isProd = isWeb && typeof window !== "undefined" && !window.location.hostname.includes("localhost");
+const BASE = isWeb
+  ? (isProd ? (process.env.EXPO_PUBLIC_BACKEND_URL ?? "") : "")
+  : (process.env.EXPO_PUBLIC_BACKEND_URL ?? "");
 
 export type WsEvent =
   | { type: "circle_message"; circle_id: string; message: any }
@@ -75,11 +79,11 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
 
   const connect = useCallback(() => {
     if (!token || suppressedRef.current) return;
-    // On web: derive ws(s):// from the current page origin (proxy handles routing).
-    // On native: convert the http(s) backend URL to ws(s).
-    const wsUrl = isWeb
-      ? `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/api/ws?token=${encodeURIComponent(token)}`
-      : BASE.replace(/^http/, "ws") + `/api/ws?token=${encodeURIComponent(token)}`;
+    // Web production: backend URL env var. Local web / native: same logic as REST.
+    const wsBase = BASE
+      ? BASE.replace(/^http/, "ws")
+      : `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}`;
+    const wsUrl = `${wsBase}/api/ws?token=${encodeURIComponent(token)}`;
     try {
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
