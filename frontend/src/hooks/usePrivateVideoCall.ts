@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { api } from "@/src/api/client";
 
 type VideoCallState = "idle" | "calling" | "incoming" | "connecting" | "active";
 
@@ -276,6 +277,24 @@ export function usePrivateVideoCall({
       frontCameraRef.current = !frontCameraRef.current;
     } catch {}
   }, []);
+
+  // Check for a pending incoming video call when the screen opens.
+  useEffect(() => {
+    if (!token || !conversationId) return;
+    let cancelled = false;
+    api<{ call: any }>("/calls/pending", {
+      token,
+      query: { conversation_id: conversationId },
+    })
+      .then((result) => {
+        if (cancelled || !result.call) return;
+        if (result.call.type && result.call.type !== "video") return;
+        pendingOfferRef.current = result.call.sdp;
+        setCallState("incoming");
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [conversationId, token]);
 
   // Subscribe to real-time video call signalling events.
   useEffect(() => {

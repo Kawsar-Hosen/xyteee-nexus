@@ -268,6 +268,7 @@ export function usePrivateVoiceCall({
     })
       .then((result) => {
         if (cancelled || !result.call) return;
+        if (result.call.type && result.call.type !== "voice") return;
         pendingOfferRef.current = result.call.sdp;
         setCallState("incoming");
       })

@@ -81,6 +81,28 @@ function AppShell() {
         return;
       }
 
+      // ── Call actions from notification ─────────────────────────────
+      // Accept: open the chat — the pending call is picked up there and the
+      // in-app call overlay shows the Accept/Decline buttons.
+      if (actionId === "accept_call" && data?.conversation_id) {
+        router.push(`/chat/${data.conversation_id}` as any);
+        return;
+      }
+
+      // Decline: tell the backend to clear the pending call + notify the caller
+      if (
+        actionId === "decline_call" &&
+        data?.conversation_id &&
+        token
+      ) {
+        api("/calls/decline", {
+          method: "POST",
+          token,
+          query: { conversation_id: data.conversation_id as string },
+        }).catch(() => {});
+        return;
+      }
+
       // ── Mark as read action ────────────────────────────────────────
       if (actionId === "mark_read") {
         // Nothing extra needed — just don't navigate

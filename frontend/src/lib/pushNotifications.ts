@@ -37,6 +37,20 @@ export async function setupNotificationChannelsAndCategories() {
     });
   }
 
+  // Notification category: call — Accept / Decline actions on incoming calls
+  await Notifications.setNotificationCategoryAsync("call", [
+    {
+      identifier: "accept_call",
+      buttonTitle: "Accept",
+      options: { isDestructive: false, isAuthenticationRequired: false },
+    },
+    {
+      identifier: "decline_call",
+      buttonTitle: "Decline",
+      options: { isDestructive: true, isAuthenticationRequired: false },
+    },
+  ]);
+
   // Notification category: message — adds inline Reply action
   await Notifications.setNotificationCategoryAsync("message", [
     {
