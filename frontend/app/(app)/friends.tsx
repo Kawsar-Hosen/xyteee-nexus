@@ -13,6 +13,7 @@ import { Avatar } from "@/src/components/Avatar";
 import { VerifiedBadge } from "@/src/components/VerifiedBadge";
 import { fonts, radii, spacing } from "@/src/theme";
 import { DOCK_PAD } from "@/src/theme/layout";
+import { loadCache, saveCache } from "@/src/utils/screenCache";
 
 type Tab = "friends" | "requests";
 
@@ -34,6 +35,22 @@ export default function Friends() {
   const [loading, setLoading] = useState(() => friendsCache === null);
   const [refreshing, setRefreshing] = useState(false);
   const [networkError, setNetworkError] = useState(false);
+
+  // Seed from the last saved session so the list shows instantly (like profile)
+  // while the background refresh runs.
+  useEffect(() => {
+    let cancelled = false;
+    loadCache<{ friends: any[]; incoming: any[]; outgoing: any[] }>("friends").then((c) => {
+      if (cancelled || !c) return;
+      friendsCache = c;
+      setFriends(c.friends || []);
+      setIncoming(c.incoming || []);
+      setOutgoing(c.outgoing || []);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const load = useCallback(async () => {
     if (!token) return;
@@ -57,6 +74,7 @@ export default function Friends() {
         incoming: nextIncoming,
         outgoing: nextOutgoing,
       };
+      saveCache("friends", friendsCache);
     } catch {
       setTimeout(() => {
         load();
@@ -131,7 +149,7 @@ export default function Friends() {
         </View>
       ) : null}
 
-      {loading ? (
+      {loading && friends.length === 0 && incoming.length === 0 && outgoing.length === 0 ? (
         <BondsSkeleton />
       ) : tab === "friends" ? (
         <FlatList

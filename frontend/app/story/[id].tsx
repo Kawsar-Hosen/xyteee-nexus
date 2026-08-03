@@ -30,10 +30,34 @@ import { NxText } from "@/src/components/NxText";
 import { Avatar } from "@/src/components/Avatar";
 import { fonts, radii, spacing } from "@/src/theme";
 import { VerifiedBadge } from "@/src/components/VerifiedBadge";
+import { storyMusicById } from "@/src/utils/storyMusic";
+import { getFeedStories, setFeedStories } from "@/src/utils/feedStore";
+import { loadCache } from "@/src/utils/screenCache";
+import { useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
 
 const STORY_EMOJIS = ["❤️"];
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
+
+function buildStoryList(feed: any[], userId: string) {
+  const tappedGroup = feed.find((x) => x.user?.user_id === userId);
+  const otherGroups = feed.filter((x) => x.user?.user_id !== userId);
+  const orderedGroups = tappedGroup ? [tappedGroup, ...otherGroups] : otherGroups;
+
+  const stories: any[] = [];
+  const authors: any[] = [];
+
+  orderedGroups.forEach((group) => {
+    const orderedStories = [...(group.stories || [])].reverse();
+
+    orderedStories.forEach((story: any) => {
+      stories.push(story);
+      authors.push(group.user);
+    });
+  });
+
+  return { stories, authors };
+}
 
 const STORY_TEXT_FONTS = [
   fonts.bodySemi,
@@ -58,14 +82,28 @@ export default function StoryViewer() {
 
   const router = useRouter();
 
-  const [stories, setStories] = useState<any[]>([]);
+  const initialDataRef = useRef<{ stories: any[]; authors: any[] } | null>(null);
+  if (!initialDataRef.current) {
+    const cached = getFeedStories();
+    initialDataRef.current = cached
+      ? buildStoryList(cached, userId)
+      : { stories: [], authors: [] };
+  }
+
+  const [stories, setStories] = useState<any[]>(initialDataRef.current.stories);
   const [author, setAuthor] = useState<any>(null);
-  const [storyAuthors, setStoryAuthors] = useState<any[]>([]);
+  const [storyAuthors, setStoryAuthors] = useState<any[]>(
+    initialDataRef.current.authors
+  );
   const [idx, setIdx] = useState(0);
   const [showSwipeHint, setShowSwipeHint] = useState(true);
   const swipeHintAnim = useRef(new Animated.Value(0)).current;
 
   const currentStory = stories[idx];
+  const musicTrack = storyMusicById(currentStory?.music_id);
+
+  const musicPlayer = useAudioPlayer(null, { updateInterval: 250 });
+  const musicStatus = useAudioPlayerStatus(musicPlayer);
 
   const videoPlayer = useVideoPlayer(
     currentStory?.kind === "video" ? currentStory.media : null,
@@ -77,7 +115,7 @@ export default function StoryViewer() {
   const [showViewers, setShowViewers] = useState(false);
   const [viewers, setViewers] = useState<any[]>([]);
   const [notViewed, setNotViewed] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !getFeedStories());
   const [replyText, setReplyText] = useState("");
   const [sendingReply, setSendingReply] = useState(false);
   const [floatEmojis, setFloatEmojis] = useState<FloatEmoji[]>([]);
@@ -88,35 +126,87 @@ export default function StoryViewer() {
 
   const load = useCallback(async () => {
     if (!token) return;
-    const r = await api<{ feed: any[] }>("/stories/feed", { token });
-    const feed = r.feed || [];
+    try {
+      const r = await api<{ feed: any[] }>("/stories/feed", { token });
+      const feed = r.feed || [];
+      setFeedStories(feed);
 
-    const tappedGroup = feed.find((x) => x.user?.user_id === userId);
-    const otherGroups = feed.filter((x) => x.user?.user_id !== userId);
-    const orderedGroups = tappedGroup
-      ? [tappedGroup, ...otherGroups]
-      : otherGroups;
-
-    const allStories: any[] = [];
-    const allAuthors: any[] = [];
-
-    orderedGroups.forEach((group) => {
-      const orderedStories = [...(group.stories || [])].reverse();
-
-      orderedStories.forEach((story: any) => {
-        allStories.push(story);
-        allAuthors.push(group.user);
-      });
-    });
-
-    setStories(allStories);
-    setStoryAuthors(allAuthors);
-    setAuthor(allAuthors[0] || null);
-    setIdx(0);
-    setLoading(false);
+      const built = buildStoryList(feed, userId);
+      setStories(built.stories);
+      setStoryAuthors(built.authors);
+      setAuthor(built.authors[Math.min(idx, Math.max(0, built.authors.length - 1))] || null);
+    } catch (error: any) {
+      console.warn("[story] refresh failed:", error?.message || error);
+    } finally {
+      setLoading(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, userId]);
 
   useEffect(() => { load(); }, [load]);
+
+  // If the feed wasn't in memory yet, hydrate from the persisted feed cache so
+  // the viewer renders instantly instead of sitting on a spinner.
+  useEffect(() => {
+    let cancelled = false;
+    if (getFeedStories() || stories.length) return;
+    loadCache<{ stories: any[] }>("feed").then((c) => {
+      if (cancelled || !c || !c.stories?.length) return;
+      const built = buildStoryList(c.stories, userId);
+      if (!built.stories.length) return;
+      setStories(built.stories);
+      setStoryAuthors(built.authors);
+      setAuthor(built.authors[0] || null);
+      setLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, stories.length]);
+
+  useEffect(() => {
+    const player = musicPlayer;
+    if (!player) return;
+
+    if (musicTrack) {
+      try { player.replace(musicTrack.source); } catch { /* ignore */ }
+      try { player.loop = true; } catch { /* ignore */ }
+      try { player.volume = 0.85; } catch { /* ignore */ }
+      /* play() first — seekTo can throw on web before the source is loaded,
+         and we must not let it swallow the play call. */
+      try { player.play(); } catch { /* ignore */ }
+      try { player.seekTo(0); } catch { /* ignore */ }
+    } else {
+      try { player.pause(); } catch { /* ignore */ }
+    }
+
+    return () => {
+      try { player.pause(); } catch { /* ignore */ }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [musicTrack, musicPlayer, idx]);
+
+  /* Web autoplay is often blocked until the user interacts with the page, and
+     by the time the feed resolves the open-gesture is consumed. Resume music on
+     the first tap anywhere so it still feels automatic. */
+  useEffect(() => {
+    if (Platform.OS !== "web" || typeof window === "undefined") return;
+    if (!musicTrack || musicStatus?.playing) return;
+
+    const start = () => {
+      try { musicPlayer.seekTo(0); } catch { /* ignore */ }
+      try { musicPlayer.play(); } catch { /* ignore */ }
+      window.removeEventListener("pointerdown", start);
+      window.removeEventListener("touchstart", start);
+    };
+
+    window.addEventListener("pointerdown", start);
+    window.addEventListener("touchstart", start);
+    return () => {
+      window.removeEventListener("pointerdown", start);
+      window.removeEventListener("touchstart", start);
+    };
+  }, [musicTrack, musicPlayer, musicStatus?.playing]);
 
   useEffect(() => {
     if (loading || !stories.length || !showSwipeHint) return;
@@ -314,7 +404,7 @@ export default function StoryViewer() {
     });
   };
 
-  if (loading) {
+  if (loading && !stories.length) {
     return (
       <View style={{ flex: 1, backgroundColor: "#000", alignItems: "center", justifyContent: "center" }}>
         <ActivityIndicator color="#fff" />
@@ -396,6 +486,49 @@ export default function StoryViewer() {
             <Feather name="x" size={20} color="#fff" />
           </TouchableOpacity>
         </View>
+
+        {/* ── Story music chip ────────────────────────────────────── */}
+        {musicTrack ? (
+          <View style={styles.musicChipWrap}>
+            <View style={styles.musicChip}>
+              <View style={styles.musicChipIcon}>
+                <Feather name="music" size={15} color="#fff" />
+              </View>
+              <View style={styles.musicChipInfo}>
+                <NxText style={styles.musicChipTitle} numberOfLines={1}>
+                  {musicTrack.emoji} {musicTrack.title}
+                </NxText>
+                <NxText style={styles.musicChipArtist} numberOfLines={1}>
+                  {musicStatus?.playing ? musicTrack.artist : "Tap to play"}
+                </NxText>
+              </View>
+              <TouchableOpacity
+                testID="story-music-toggle"
+                onPress={() => {
+                  if (musicStatus?.playing) {
+                    musicPlayer.pause();
+                  } else {
+                    try {
+                      musicPlayer.seekTo(0);
+                      musicPlayer.play();
+                    } catch { /* ignore */ }
+                  }
+                }}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                style={[
+                  styles.musicChipToggle,
+                  !musicStatus?.playing && styles.musicChipToggleIdle,
+                ]}
+              >
+                <Feather
+                  name={musicStatus?.playing ? "pause" : "play"}
+                  size={15}
+                  color="#fff"
+                />
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : null}
 
         {/* ── Tap zones ──────────────────────────────────────────── */}
         <View
@@ -812,6 +945,64 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.32)",
     alignItems: "center",
     justifyContent: "center",
+  },
+  musicChipWrap: {
+    paddingHorizontal: spacing.md,
+    marginBottom: 6,
+    position: "relative",
+    zIndex: 10,
+    elevation: 10,
+    pointerEvents: "box-none",
+  },
+  musicChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    maxWidth: "78%",
+    backgroundColor: "rgba(0,0,0,0.5)",
+    borderRadius: radii.pill,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.16)",
+    paddingLeft: 5,
+    paddingRight: 4,
+    paddingVertical: 4,
+  },
+  musicChipIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: "rgba(255,255,255,0.14)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 8,
+  },
+  musicChipInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+  musicChipTitle: {
+    color: "#fff",
+    fontSize: 12,
+    fontFamily: fonts.bodySemi,
+    lineHeight: 15,
+  },
+  musicChipArtist: {
+    color: "rgba(255,255,255,0.55)",
+    fontSize: 10,
+    fontFamily: fonts.body,
+    lineHeight: 13,
+  },
+  musicChipToggle: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: "rgba(255,255,255,0.16)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginLeft: 8,
+  },
+  musicChipToggleIdle: {
+    backgroundColor: "#0A84FF",
   },
   taps: {
     position: "absolute",

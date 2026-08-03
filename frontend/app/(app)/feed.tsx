@@ -28,7 +28,8 @@ import { NexusMark } from "@/src/components/NexusMark";
 import { VerifiedBadge } from "@/src/components/VerifiedBadge";
 import { fonts, spacing } from "@/src/theme";
 import { DOCK_PAD } from "@/src/theme/layout";
-
+import { loadCache, saveCache } from "@/src/utils/screenCache";
+import { setFeedStories } from "@/src/utils/feedStore";
 dayjs.extend(relativeTime);
 
 type StoryGroup = {
@@ -102,6 +103,23 @@ export default function Feed() {
   const [refreshing, setRefreshing] = useState(false);
   const loadingRef = useRef(false);
 
+  // Seed from the last saved session so a returning user sees content
+  // immediately (like profile) while the background refresh runs.
+  useEffect(() => {
+    let cancelled = false;
+    loadCache<{ stories: StoryGroup[]; chats: Chat[]; notifCount: number }>("feed").then((c) => {
+      if (cancelled || !c) return;
+      feedCache = c;
+      setStories(c.stories || []);
+      setChats(c.chats || []);
+      setNotifCount(c.notifCount || 0);
+      setFeedStories(c.stories || []);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const load = useCallback(async () => {
     if (!token || loadingRef.current) return;
 
@@ -136,7 +154,7 @@ export default function Feed() {
 
         if (attempt < 2) {
           await new Promise((resolve) =>
-            setTimeout(resolve, 700 * (attempt + 1))
+            setTimeout(resolve, 350 * (attempt + 1))
           );
         }
       }
@@ -153,12 +171,14 @@ export default function Feed() {
 
       setStories(nextStories);
       setChats(nextChats);
+      setFeedStories(nextStories);
 
       feedCache = {
         stories: nextStories,
         chats: nextChats,
         notifCount: feedCache?.notifCount || 0,
       };
+      saveCache("feed", feedCache);
 
       api<{ notifications: any[] }>("/notifications", { token })
         .then((n) => {
@@ -316,7 +336,7 @@ export default function Feed() {
         </View>
       </View>
 
-      {loading ? (
+      {loading && chats.length === 0 && stories.length === 0 ? (
         <FeedSkeleton />
       ) : (
         <FlatList

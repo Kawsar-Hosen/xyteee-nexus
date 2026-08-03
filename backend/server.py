@@ -127,15 +127,15 @@ CACHE_TTL = 30  # seconds
 def _cache_key(path: str, user_id: str) -> str:
     return f"{user_id}:{path}"
 
-def _get_cached(key: str) -> Optional[Any]:
+def _get_cached(key: str, ttl: Optional[float] = None) -> Optional[Any]:
     entry = _cache_store.get(key)
-    if entry and _time.time() - entry["ts"] < CACHE_TTL:
+    if entry and _time.time() - entry["ts"] < (ttl if ttl is not None else CACHE_TTL):
         return entry["data"]
     _cache_store.pop(key, None)
     return None
 
-def _set_cached(key: str, data: Any) -> None:
-    _cache_store[key] = {"data": data, "ts": _time.time()}
+def _set_cached(key: str, data: Any, ttl: Optional[float] = None) -> None:
+    _cache_store[key] = {"data": data, "ts": _time.time(), "ttl": ttl if ttl is not None else CACHE_TTL}
 
 def _invalidate_user_cache(user_id: str) -> None:
     keys_to_remove = [k for k in _cache_store if k.startswith(f"{user_id}:")]
@@ -698,6 +698,7 @@ class StoryIn(BaseModel):
     media_scale: float = 1.0
     media_x: float = 0.0
     media_y: float = 0.0
+    music_id: Optional[str] = None
 
 
 class FriendActionIn(BaseModel):
@@ -3403,11 +3404,13 @@ async def create_story(body: StoryIn, user=Depends(current_user)):
         "media_scale": max(0.5, min(5.0, body.media_scale)),
         "media_x": max(-2.0, min(2.0, body.media_x)),
         "media_y": max(-2.0, min(2.0, body.media_y)),
+        "music_id": (body.music_id or "").strip()[:48] or None,
         "viewers": [],
         "created_at": ts(now_utc()),
         "expires_at": ts(now_utc() + timedelta(hours=24)),
     }
     await run(lambda: sb.table("stories").insert(doc).execute())
+    _invalidate_user_cache(user["user_id"])
     fr = await run(lambda: sb.table("friendships").select("a,b")
         .or_(f"a.eq.{user['user_id']},b.eq.{user['user_id']}").execute())
     for f in fr.data:
@@ -3422,23 +3425,23 @@ async def create_story(body: StoryIn, user=Depends(current_user)):
 @api.get("/stories/feed")
 async def stories_feed(user=Depends(current_user)):
     me = user["user_id"]
-    blocked_ids = await blocked_user_ids(me)
+    cached = _get_cached(_cache_key("/stories/feed", me), ttl=8)
+    if cached is not None:
+        return cached
 
-    # Accepted bonds
+    # Accepted bonds — sequential awaits only. The supabase-py client is a sync
+    # httpx.Client; running its calls concurrently across threads can corrupt the
+    # connection (LocalProtocolError). The 8s cache absorbs the latency.
+    blocked_ids = await blocked_user_ids(me)
     fr = await run(lambda: sb.table("friendships").select("a,b")
         .or_(f"a.eq.{me},b.eq.{me}").execute())
+    sr = await run(lambda: sb.table("stories").select("*")
+        .gt("expires_at", ts(now_utc()))
+        .order("created_at", desc=True).execute())
     friend_ids = {
         f["a"] if f["b"] == me else f["b"]
         for f in (fr.data or [])
     }
-
-    # All active stories:
-    # - my own stories
-    # - public stories from anyone
-    # - private stories only from accepted bonds
-    sr = await run(lambda: sb.table("stories").select("*")
-        .gt("expires_at", ts(now_utc()))
-        .order("created_at", desc=True).execute())
 
     by_user: Dict[str, List[dict]] = {}
 
@@ -3459,7 +3462,9 @@ async def stories_feed(user=Depends(current_user)):
 
     uid_list = list(by_user.keys())
     if not uid_list:
-        return {"feed": []}
+        result = {"feed": []}
+        _set_cached(_cache_key("/stories/feed", me), result, ttl=8)
+        return result
 
     ur = await run(lambda: sb.table("users").select("*")
         .in_("user_id", uid_list).execute())
@@ -3477,7 +3482,9 @@ async def stories_feed(user=Depends(current_user)):
             -len(x["stories"])
         )
     )
-    return {"feed": out}
+    result = {"feed": out}
+    _set_cached(_cache_key("/stories/feed", me), result, ttl=8)
+    return result
 
 
 @api.post("/stories/{story_id}/view")
@@ -3495,6 +3502,7 @@ async def view_story(story_id: str, user=Depends(current_user)):
     if user["user_id"] != s["user_id"] and not any(v.get("user_id") == user["user_id"] for v in viewers):
         viewers.append({"user_id": user["user_id"], "viewed_at": ts(now_utc())})
         await run(lambda: sb.table("stories").update({"viewers": viewers}).eq("story_id", story_id).execute())
+        _invalidate_user_cache(user["user_id"])
     return {"ok": True}
 
 

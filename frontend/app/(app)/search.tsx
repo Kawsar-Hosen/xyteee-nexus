@@ -20,6 +20,7 @@ import { Avatar } from "@/src/components/Avatar";
 import { VerifiedBadge } from "@/src/components/VerifiedBadge";
 import { fonts, radii, spacing } from "@/src/theme";
 import { DOCK_PAD } from "@/src/theme/layout";
+import { loadCache, saveCache } from "@/src/utils/screenCache";
 
 let searchCache: {
   recentAccounts: any[];
@@ -41,6 +42,21 @@ export default function Search() {
   );
   const [loading, setLoading] = useState(false);
   const [recentLoading, setRecentLoading] = useState(() => searchCache === null);
+
+  // Seed from the last saved session so suggestions show instantly (like
+  // profile) while the background refresh runs.
+  useEffect(() => {
+    let cancelled = false;
+    loadCache<{ recentAccounts: any[]; discoverMoreAccounts: any[] }>("search").then((c) => {
+      if (cancelled || !c) return;
+      searchCache = c;
+      setRecentAccounts(c.recentAccounts || []);
+      setDiscoverMoreAccounts(c.discoverMoreAccounts || []);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const run = useCallback(
     async (query: string) => {
@@ -87,6 +103,7 @@ export default function Search() {
         recentAccounts: uniqueAccounts,
         discoverMoreAccounts: searchCache?.discoverMoreAccounts || [],
       };
+      saveCache("search", searchCache);
     } finally {
       setRecentLoading(false);
     }
@@ -117,6 +134,7 @@ export default function Search() {
         recentAccounts: searchCache?.recentAccounts || [],
         discoverMoreAccounts: uniqueAccounts,
       };
+      saveCache("search", searchCache);
     } catch (error) {
       console.log("Discover More load failed:", error);
       setDiscoverMoreAccounts([]);
@@ -291,9 +309,9 @@ export default function Search() {
             paddingBottom: DOCK_PAD,
           }}
         >
-          {recentLoading ? (
+          {recentLoading && recentAccounts.length === 0 && discoverMoreAccounts.length === 0 ? (
             <FindSkeleton />
-          ) : recentAccounts.length > 0 ? (
+          ) : recentAccounts.length > 0 || discoverMoreAccounts.length > 0 ? (
             <>
               <View style={styles.suggestionHeader}>
                 <View

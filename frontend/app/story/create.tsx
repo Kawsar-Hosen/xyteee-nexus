@@ -14,6 +14,7 @@ import {
   Platform,
   Animated,
   PanResponder,
+  ScrollView,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -28,6 +29,7 @@ import { api } from "@/src/api/client";
 import { uploadFile } from "@/src/api/upload";
 import { NxText } from "@/src/components/NxText";
 import { fonts, radii, spacing } from "@/src/theme";
+import { STORY_MUSIC } from "@/src/utils/storyMusic";
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 
@@ -75,6 +77,8 @@ export default function StoryCreate() {
   const [showTextTools, setShowTextTools] = useState(false);
   const [showCustomColor, setShowCustomColor] = useState(false);
   const [customColor, setCustomColor] = useState("#FFFFFF");
+  const [musicId, setMusicId] = useState<string | null>(null);
+  const [showMusicPicker, setShowMusicPicker] = useState(false);
 
   const mediaScale = useRef(new Animated.Value(1)).current;
   const mediaTranslate = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
@@ -284,6 +288,7 @@ export default function StoryCreate() {
           media_scale: mediaScaleValue.current,
           media_x: mediaTranslateValue.current.x / SCREEN_W,
           media_y: mediaTranslateValue.current.y / SCREEN_H,
+          music_id: musicId,
         },
         token,
       });
@@ -641,6 +646,71 @@ export default function StoryCreate() {
         </View>
       ) : null}
 
+      {/* ── Music picker ──────────────────────────────────────────────── */}
+      {media && showMusicPicker ? (
+        <View style={styles.musicPanel}>
+          <View style={styles.musicPanelHeader}>
+            <Feather name="music" size={14} color="#fff" />
+            <NxText style={styles.musicPanelTitle}>Add music to your story</NxText>
+          </View>
+
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.musicTrackRow}
+          >
+            <TouchableOpacity
+              onPress={() => setMusicId(null)}
+              activeOpacity={0.82}
+              style={[
+                styles.musicTrackChip,
+                !musicId && styles.musicTrackChipActive,
+              ]}
+            >
+              <NxText
+                style={[
+                  styles.musicTrackLabel,
+                  !musicId && styles.musicTrackLabelActive,
+                ]}
+              >
+                No music
+              </NxText>
+            </TouchableOpacity>
+
+            {STORY_MUSIC.map((track) => {
+              const selected = musicId === track.id;
+              return (
+                <TouchableOpacity
+                  key={track.id}
+                  onPress={() => setMusicId(selected ? null : track.id)}
+                  activeOpacity={0.82}
+                  style={[
+                    styles.musicTrackChip,
+                    selected && styles.musicTrackChipActive,
+                  ]}
+                >
+                  <NxText style={styles.musicTrackEmoji}>{track.emoji}</NxText>
+                  <NxText
+                    numberOfLines={1}
+                    style={[
+                      styles.musicTrackLabel,
+                      selected && styles.musicTrackLabelActive,
+                    ]}
+                  >
+                    {track.title}
+                  </NxText>
+                  {selected ? (
+                    <View style={styles.musicTrackCheck}>
+                      <Feather name="check" size={10} color="#000" />
+                    </View>
+                  ) : null}
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+      ) : null}
+
       {/* ── Bottom controls ─────────────────────────────────────────────── */}
       <SafeAreaView edges={["bottom"]} style={styles.bottomSafe} pointerEvents="box-none">
         <View style={styles.bottomRow}>
@@ -659,6 +729,32 @@ export default function StoryCreate() {
               </View>
             </TouchableOpacity>
           ) : null}
+
+          {/* Music toggle */}
+          <TouchableOpacity
+            onPress={() => {
+              setShowMusicPicker((v) => !v);
+              setShowTextTools(false);
+            }}
+            activeOpacity={0.8}
+            style={[
+              styles.musicBtn,
+              showMusicPicker && styles.musicBtnActive,
+            ]}
+          >
+            <Feather
+              name="music"
+              size={15}
+              color={musicId ? "#fff" : "rgba(255,255,255,0.85)"}
+            />
+            {musicId ? (
+              <View style={styles.musicBtnBadge}>
+                <NxText style={styles.musicBtnBadgeText}>
+                  {STORY_MUSIC.find((t) => t.id === musicId)?.emoji ?? "♪"}
+                </NxText>
+              </View>
+            ) : null}
+          </TouchableOpacity>
 
           {/* Privacy pill */}
           <TouchableOpacity
@@ -1149,5 +1245,103 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontFamily: fonts.bodySemi,
     fontSize: 14,
+  },
+  musicBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: "rgba(255,255,255,0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.2)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  musicBtnActive: {
+    backgroundColor: "rgba(255,255,255,0.22)",
+    borderColor: "#fff",
+  },
+  musicBtnBadge: {
+    position: "absolute",
+    top: -3,
+    right: -3,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "#000",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  musicBtnBadgeText: {
+    fontSize: 9,
+    lineHeight: 14,
+  },
+  musicPanel: {
+    position: "absolute",
+    left: 10,
+    right: 10,
+    bottom: 88,
+    zIndex: 42,
+    elevation: 42,
+    backgroundColor: "rgba(12,12,16,0.96)",
+    borderRadius: 24,
+    paddingTop: 12,
+    paddingBottom: 14,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.14)",
+  },
+  musicPanelHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    paddingHorizontal: 16,
+    marginBottom: 10,
+  },
+  musicPanelTitle: {
+    color: "#fff",
+    fontSize: 13,
+    fontFamily: fonts.bodySemi,
+  },
+  musicTrackRow: {
+    paddingHorizontal: 12,
+    gap: 8,
+  },
+  musicTrackChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    height: 40,
+    paddingHorizontal: 13,
+    borderRadius: 20,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.14)",
+  },
+  musicTrackChipActive: {
+    backgroundColor: "rgba(255,255,255,0.2)",
+    borderColor: "#fff",
+  },
+  musicTrackEmoji: {
+    fontSize: 15,
+    lineHeight: 20,
+  },
+  musicTrackLabel: {
+    color: "rgba(255,255,255,0.75)",
+    fontSize: 13,
+    fontFamily: fonts.bodyMedium,
+  },
+  musicTrackLabelActive: {
+    color: "#fff",
+    fontFamily: fonts.bodySemi,
+  },
+  musicTrackCheck: {
+    width: 17,
+    height: 17,
+    borderRadius: 9,
+    backgroundColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center",
+    marginLeft: 2,
   },
 });
