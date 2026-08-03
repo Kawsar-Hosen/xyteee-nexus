@@ -76,6 +76,7 @@ export default function StoryViewer() {
   );
   const [showViewers, setShowViewers] = useState(false);
   const [viewers, setViewers] = useState<any[]>([]);
+  const [notViewed, setNotViewed] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [replyText, setReplyText] = useState("");
   const [sendingReply, setSendingReply] = useState(false);
@@ -218,8 +219,9 @@ export default function StoryViewer() {
     const s = stories[idx];
     if (!s) return;
     pauseTimer();
-    const r = await api<{ viewers: any[] }>(`/stories/${s.story_id}/viewers`, { token: token! });
+    const r = await api<{ viewers: any[]; not_viewed?: any[] }>(`/stories/${s.story_id}/viewers`, { token: token! });
     setViewers(r.viewers || []);
+    setNotViewed(r.not_viewed || []);
     setShowViewers(true);
   };
 
@@ -665,7 +667,10 @@ export default function StoryViewer() {
               <View>
                 <NxText style={styles.viewersTitle}>Story viewers</NxText>
                 <NxText style={styles.viewersSubtitle}>
-                  {viewers.length} {viewers.length === 1 ? "person has" : "people have"} seen your story
+                  {viewers.length} {viewers.length === 1 ? "person has" : "people have"} seen
+                  {notViewed.length > 0
+                    ? ` · ${notViewed.length} ${notViewed.length === 1 ? "hasn't" : "haven't"} seen yet`
+                    : " your story"}
                 </NxText>
               </View>
 
@@ -733,6 +738,49 @@ export default function StoryViewer() {
                     People who view your story will appear here.
                   </NxText>
                 </View>
+              }
+              ListFooterComponent={
+                notViewed.length > 0 ? (
+                  <View>
+                    <View style={styles.sectionDivider} />
+                    <View style={styles.notViewedHeader}>
+                      <View style={styles.notViewedTitleRow}>
+                        <Feather name="eye-off" size={14} color={colors.mutedFg} />
+                        <NxText style={styles.notViewedTitle}>
+                          Not viewed yet
+                        </NxText>
+                      </View>
+                      <NxText style={[styles.notViewedCount, { color: colors.mutedFg }]}>
+                        {notViewed.length}
+                      </NxText>
+                    </View>
+                    {notViewed.map((nv, nvi) => (
+                      <View key={nv.user?.user_id || `nv-${nvi}`} style={styles.viewerRow}>
+                        <Avatar
+                          uri={nv.user?.profile_picture}
+                          name={nv.user?.display_name}
+                          size={46}
+                          frame={nv.user?.profile_frame}
+                          achievement={nv.user?.achievement_level}
+                          animation={nv.user?.profile_animation}
+                          animationSpeed={nv.user?.profile_animation_speed}
+                          animationIntensity={nv.user?.profile_animation_intensity}
+                        />
+                        <View style={styles.viewerInfo}>
+                          <View style={styles.viewerNameRow}>
+                            <NxText style={[styles.viewerName, { opacity: 0.5 }]}>
+                              {nv.user?.display_name}
+                            </NxText>
+                            <VerifiedBadge badgeType={nv.user?.badge_type} badgeIcon={nv.user?.badge_icon} badgeExpiresAt={nv.user?.badge_expires_at} size={16} />
+                          </View>
+                          <NxText style={[styles.viewerTime, { color: colors.mutedFg }]}>
+                            Haven't seen it yet
+                          </NxText>
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                ) : null
               }
             />
           </View>
@@ -992,6 +1040,30 @@ const styles = StyleSheet.create({
   },
   viewersList: {
     paddingBottom: 8,
+  },
+  sectionDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: "rgba(128,128,128,0.3)",
+    marginVertical: 14,
+  },
+  notViewedHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 6,
+  },
+  notViewedTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  notViewedTitle: {
+    fontFamily: fonts.bodySemi,
+    fontSize: 15,
+  },
+  notViewedCount: {
+    fontFamily: fonts.bodySemi,
+    fontSize: 12,
   },
   viewerRow: {
     minHeight: 68,

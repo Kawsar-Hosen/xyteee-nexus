@@ -26,6 +26,8 @@ export type WsEvent =
     }
   | { type: "message_delete"; message_id: string }
   | { type: "message_pin"; message: any }
+  | { type: "live_location_update"; conversation_id: string; message_id: string; user_id: string; content: string }
+  | { type: "live_location_end"; conversation_id: string; message_id: string; user_id: string; content: string }
   | { type: "chat_cleared"; conversation_id: string }
   | { type: "conversation_deleted"; conversation_id: string; deleted_by: string }
   | { type: "blocked"; by_user_id: string }
@@ -61,9 +63,18 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
   const listenersRef = useRef<Set<Listener>>(new Set());
   const [connected, setConnected] = useState(false);
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const suppressedRef = useRef(false);
+
+  const stopPing = () => {
+    if (pingRef.current) {
+      clearInterval(pingRef.current);
+      pingRef.current = null;
+    }
+  };
 
   const connect = useCallback(() => {
-    if (!token) return;
+    if (!token || suppressedRef.current) return;
     // On web: derive ws(s):// from the current page origin (proxy handles routing).
     // On native: convert the http(s) backend URL to ws(s).
     const wsUrl = isWeb
@@ -72,10 +83,22 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
     try {
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
-      ws.onopen = () => setConnected(true);
+      ws.onopen = () => {
+        setConnected(true);
+        stopPing();
+        // Heartbeat so the server never marks an active client offline.
+        pingRef.current = setInterval(() => {
+          if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+            try {
+              wsRef.current.send(JSON.stringify({ type: "ping" }));
+            } catch {}
+          }
+        }, 25000);
+      };
       ws.onclose = () => {
         setConnected(false);
-        if (token) {
+        stopPing();
+        if (token && !suppressedRef.current) {
           reconnectRef.current = setTimeout(connect, 3000);
         }
       };
@@ -102,7 +125,37 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
     connect();
     return () => {
       if (reconnectRef.current) clearTimeout(reconnectRef.current);
+      stopPing();
       if (wsRef.current) { try { wsRef.current.close(); } catch {} }
+    };
+  }, [token, connect]);
+
+  // Web only: closing the tab/browser or switching away should reflect offline
+  // in real time. Close the socket when hidden; reopen when visible again.
+  useEffect(() => {
+    if (Platform.OS !== "web") return;
+
+    const onVis = () => {
+      if (document.hidden) {
+        suppressedRef.current = true;
+        stopPing();
+        if (wsRef.current) { try { wsRef.current.close(); } catch {} }
+      } else {
+        suppressedRef.current = false;
+        if (token && (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN)) {
+          connect();
+        }
+      }
+    };
+    const onBeforeUnload = () => {
+      if (wsRef.current) { try { wsRef.current.close(); } catch {} }
+    };
+
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => {
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("beforeunload", onBeforeUnload);
     };
   }, [token, connect]);
 

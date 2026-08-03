@@ -32,7 +32,7 @@ export function useVoiceRecorder() {
   const start = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mr = new MediaRecorder(stream);
+      const mr = new MediaRecorder(stream, { audioBitsPerSecond: 32000 });
       const chunks: Blob[] = [];
       mr.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
       recRef.current = { mr, stream, chunks };

@@ -7,6 +7,7 @@ import httpx
 
 import os
 import uuid
+import json
 import logging
 import asyncio
 import smtplib
@@ -305,6 +306,14 @@ def public_user(u: Optional[dict]) -> Optional[dict]:
         data["profile_animation_intensity"] = None
         data["profile_animation_expires_at"] = None
 
+    # Presence: even if the DB flag says online, treat a stale last_seen as
+    # offline. This covers browser tabs that die without a clean WS close,
+    # crashes, and backend restarts where the flag lingers.
+    online_flag = bool(data.get("online"))
+    last_seen = parse_ts(data.get("last_seen"))
+    if online_flag and last_seen and (now_utc() - last_seen).total_seconds() > ONLINE_GRACE_SECONDS:
+        data["online"] = False
+
     return data
 
 
@@ -446,27 +455,62 @@ async def current_user(authorization: Optional[str] = Header(None)) -> dict:
 
 
 # ── WebSocket hub (in-memory presence) ────────────────────────────────────────
+# Grace window before a user is shown offline after their socket goes away.
+# Clients heartbeat {"type":"ping"} every ~25s while active; browsers also close
+# the socket on tab hide/close. The offline flip is DELAYED by this window so a
+# quick tab switch or short leave does not flip you offline — it shows after
+# roughly 30-40s of absence, and reconnecting within the window cancels it.
+ONLINE_GRACE_SECONDS = 35
+
+
 class Hub:
     def __init__(self):
         self.connections: Dict[str, Set[WebSocket]] = {}
+        self.pending_offline: Dict[str, asyncio.Task] = {}
 
     async def connect(self, user_id: str, ws: WebSocket):
+        # Reconnecting inside the grace window cancels any pending offline flip.
+        task = self.pending_offline.pop(user_id, None)
+        if task:
+            task.cancel()
         self.connections.setdefault(user_id, set()).add(ws)
         await run(lambda: sb.table("users")
             .update({"online": True, "last_seen": ts(now_utc())})
             .eq("user_id", user_id).execute())
         await self._broadcast_presence(user_id, True)
 
-    async def disconnect(self, user_id: str, ws: WebSocket):
+    async def disconnect(self, user_id: str, ws: WebSocket, delay: bool = True):
         conns = self.connections.get(user_id)
         if conns:
             conns.discard(ws)
         if not conns:
             self.connections.pop(user_id, None)
-            await run(lambda: sb.table("users")
-                .update({"online": False, "last_seen": ts(now_utc())})
-                .eq("user_id", user_id).execute())
-            await self._broadcast_presence(user_id, False)
+            task = self.pending_offline.pop(user_id, None)
+            if task:
+                task.cancel()
+            if delay:
+                # Normal close (tab close / app leave): wait the grace window
+                # before showing offline, in case they come right back.
+                self.pending_offline[user_id] = asyncio.create_task(
+                    self._flush_offline(user_id)
+                )
+            else:
+                # Silence timeout: the grace already elapsed while silent.
+                await self._flush_offline(user_id, wait=False)
+
+    async def _flush_offline(self, user_id: str, wait: bool = True):
+        if wait:
+            try:
+                await asyncio.sleep(ONLINE_GRACE_SECONDS)
+            except asyncio.CancelledError:
+                return
+        self.pending_offline.pop(user_id, None)
+        if self.connections.get(user_id):
+            return
+        await run(lambda: sb.table("users")
+            .update({"online": False, "last_seen": ts(now_utc())})
+            .eq("user_id", user_id).execute())
+        await self._broadcast_presence(user_id, False)
 
     async def send(self, user_id: str, payload: dict):
         for ws in list(self.connections.get(user_id, set())):
@@ -509,6 +553,36 @@ pending_voice_calls: Dict[str, dict] = {}
 
 async def broadcast_to_user(user_id: str, payload: dict):
     await hub.send(user_id, jsonable(payload))
+
+
+# ── Presence sweeper ──────────────────────────────────────────────────────────
+# Periodically flips any DB "online" flag whose last_seen has gone stale with no
+# live WebSocket behind it (backend restarts, crashes) and pings friends live.
+_PRESENCE_SWEEPER_STARTED = False
+
+
+async def _presence_sweeper():
+    global _PRESENCE_SWEEPER_STARTED
+    _PRESENCE_SWEEPER_STARTED = True
+    while True:
+        try:
+            await asyncio.sleep(30)
+            rows = await run(lambda: sb.table("users")
+                .select("user_id,last_seen")
+                .eq("online", True).execute())
+            now = now_utc()
+            for u in (rows.data or []):
+                last_seen = parse_ts(u.get("last_seen"))
+                if not last_seen or (now - last_seen).total_seconds() <= ONLINE_GRACE_SECONDS:
+                    continue
+                if hub.connections.get(u["user_id"]):
+                    continue
+                await run(lambda uid=u["user_id"]: sb.table("users")
+                    .update({"online": False})
+                    .eq("user_id", uid).execute())
+                await hub._broadcast_presence(u["user_id"], False)
+        except Exception as e:
+            logger.warning("presence sweeper error: %s", e)
 
 
 # ── Pydantic models ────────────────────────────────────────────────────────────
@@ -3139,7 +3213,14 @@ async def send_message(body: MessageIn, user=Depends(current_user)):
         "created_at": ts(now_utc()),
     }
     await run(lambda: sb.table("messages").insert(msg).execute())
-    preview = body.content[:80] if body.kind == "text" else f"[{body.kind}]"
+    if body.kind == "text":
+        preview = body.content[:80]
+    elif body.kind == "live_location":
+        preview = "📍 Live location"
+    elif body.kind == "location":
+        preview = "📍 Location"
+    else:
+        preview = f"[{body.kind}]"
     await run(lambda: sb.table("conversations")
         .update({"last_message": preview, "last_message_at": ts(now_utc())})
         .eq("conversation_id", body.conversation_id).execute())
@@ -3423,14 +3504,24 @@ async def story_viewers(story_id: str, user=Depends(current_user)):
     if not sr.data or sr.data[0]["user_id"] != user["user_id"]:
         raise HTTPException(status_code=403, detail="Not allowed")
     s = sr.data[0]
+    blocked = await blocked_user_ids(user["user_id"])
+
+    # Accepted bonds (friends) who have NOT viewed yet
+    fr = await run(lambda: sb.table("friendships").select("a,b")
+        .or_(f"a.eq.{user['user_id']},b.eq.{user['user_id']}").execute())
+    friend_ids = {
+        f["a"] if f["b"] == user["user_id"] else f["b"]
+        for f in (fr.data or [])
+    }
+
     viewers_raw: list = s.get("viewers") or []
     ids = [v["user_id"] for v in viewers_raw]
     if not ids:
-        return {"viewers": [], "count": 0}
+        return {"viewers": [], "count": 0, "not_viewed": [], "not_viewed_count": 0}
     ur = await run(lambda: sb.table("users").select("*").in_("user_id", ids).execute())
     umap = {u["user_id"]: public_user(u) for u in ur.data}
-    blocked = await blocked_user_ids(user["user_id"])
     viewers = []
+    viewed_ids: Set[str] = set()
     for v in viewers_raw:
         viewer_id = v.get("user_id")
         viewer_user = umap.get(viewer_id)
@@ -3441,6 +3532,7 @@ async def story_viewers(story_id: str, user=Depends(current_user)):
         if viewer_id in blocked:
             continue
 
+        viewed_ids.add(viewer_id)
         viewers.append({
             "user": viewer_user,
             "viewed_at": v.get("viewed_at"),
@@ -3449,7 +3541,22 @@ async def story_viewers(story_id: str, user=Depends(current_user)):
             "reacted_at": v.get("reacted_at"),
         })
 
-    return {"viewers": viewers, "count": len(viewers)}
+    not_viewed_ids = [fid for fid in friend_ids if fid not in viewed_ids and fid not in blocked]
+    not_viewed: list = []
+    if not_viewed_ids:
+        nur = await run(lambda: sb.table("users").select("*").in_("user_id", not_viewed_ids).execute())
+        nv_map = {u["user_id"]: public_user(u) for u in (nur.data or [])}
+        for fid in not_viewed_ids:
+            nvu = nv_map.get(fid)
+            if nvu:
+                not_viewed.append({"user": nvu})
+
+    return {
+        "viewers": viewers,
+        "count": len(viewers),
+        "not_viewed": not_viewed,
+        "not_viewed_count": len(not_viewed),
+    }
 
 
 @api.delete("/stories/{story_id}")
@@ -3644,9 +3751,23 @@ async def websocket_endpoint(ws: WebSocket, token: str):
     except Exception:
         typing_conversations = {}
 
+    timed_out = False
     try:
         while True:
-            data = await ws.receive_json()
+            try:
+                # Server-side heartbeat guard: if the client goes silent
+                # (crash/network drop) past the grace window, tear the
+                # connection down so presence flips to offline.
+                data = await asyncio.wait_for(
+                    ws.receive_json(), timeout=ONLINE_GRACE_SECONDS
+                )
+            except asyncio.TimeoutError:
+                timed_out = True
+                try:
+                    await ws.close()
+                except Exception:
+                    pass
+                break
             t = data.get("type")
 
             if t == "typing":
@@ -3719,6 +3840,95 @@ async def websocket_endpoint(ws: WebSocket, token: str):
                                 "read_by": new_rb,
                                 "read_by_user_id": user_id,
                             })
+
+            elif t in {"live_location_update", "live_location_end"}:
+                conv_id = data.get("conversation_id")
+                message_id = data.get("message_id")
+                participants = typing_conversations.get(conv_id, [])
+
+                if conv_id and message_id:
+                    if not participants:
+                        cr = await run(
+                            lambda: sb.table("conversations")
+                            .select("participants")
+                            .eq("conversation_id", conv_id)
+                            .limit(1)
+                            .execute()
+                        )
+
+                        if cr.data:
+                            participants = cr.data[0].get("participants", [])
+                            typing_conversations[conv_id] = participants
+
+                    if user_id in participants:
+                        mr = await run(
+                            lambda: sb.table("messages")
+                            .select("kind,content,sender_id")
+                            .eq("message_id", message_id)
+                            .eq("conversation_id", conv_id)
+                            .limit(1)
+                            .execute()
+                        )
+
+                        if mr.data:
+                            msg = mr.data[0]
+
+                            if (
+                                msg.get("kind") == "live_location"
+                                and msg.get("sender_id") == user_id
+                            ):
+                                try:
+                                    payload_obj = json.loads(
+                                        msg.get("content") or "{}"
+                                    )
+                                except Exception:
+                                    payload_obj = {}
+
+                                if t == "live_location_end":
+                                    payload_obj["expires_at"] = ts(now_utc())
+                                else:
+                                    lat = data.get("lat")
+                                    lng = data.get("lng")
+
+                                    if not (
+                                        isinstance(lat, (int, float))
+                                        and isinstance(lng, (int, float))
+                                    ):
+                                        continue
+
+                                    try:
+                                        ended = (
+                                            parse_ts(payload_obj.get("expires_at"))
+                                            <= now_utc()
+                                            if payload_obj.get("expires_at")
+                                            else False
+                                        )
+                                    except Exception:
+                                        ended = False
+
+                                    if ended:
+                                        continue
+
+                                    payload_obj["lat"] = round(float(lat), 6)
+                                    payload_obj["lng"] = round(float(lng), 6)
+
+                                new_content = json.dumps(payload_obj)
+
+                                await run(
+                                    lambda: sb.table("messages")
+                                    .update({"content": new_content})
+                                    .eq("message_id", message_id)
+                                    .execute()
+                                )
+
+                                for participant_id in participants:
+                                    await hub.send(participant_id, {
+                                        "type": t,
+                                        "conversation_id": conv_id,
+                                        "message_id": message_id,
+                                        "user_id": user_id,
+                                        "content": new_content,
+                                    })
 
             elif t in {"call_offer", "call_answer", "call_ice", "call_end",
                        "video_call_offer", "video_call_answer", "video_call_ice", "video_call_end"}:
@@ -3815,13 +4025,140 @@ async def websocket_endpoint(ws: WebSocket, token: str):
                                     )
 
             elif t == "ping":
+                await run(lambda: sb.table("users")
+                    .update({"last_seen": ts(now_utc())})
+                    .eq("user_id", user_id).execute())
                 await ws.send_json({"type": "pong"})
     except WebSocketDisconnect:
         pass
     except Exception as e:
         logger.exception("ws error: %s", e)
     finally:
-        await hub.disconnect(user_id, ws)
+        await hub.disconnect(user_id, ws, delay=not timed_out)
+
+
+# ── Link preview (unfurl) ─────────────────────────────────────────────────────
+# Fetches a shared URL's page and returns title / description / image / favicon
+# so chat bubbles can render a rich link card. Results cached briefly.
+import re
+from urllib.parse import urlparse, urljoin
+
+LINK_CACHE: Dict[str, dict] = {}
+LINK_CACHE_TTL = 3600
+
+
+def _og(html: str, prop: str) -> Optional[str]:
+    m = re.search(
+        r'<meta[^>]+property=["\']og:%s["\'][^>]*content=["\']([^"\']+)["\']'
+        % re.escape(prop),
+        html,
+        re.IGNORECASE,
+    )
+    if not m:
+        m = re.search(
+            r'<meta[^>]+content=["\']([^"\']+)["\'][^>]*property=["\']og:%s["\']'
+            % re.escape(prop),
+            html,
+            re.IGNORECASE,
+        )
+    return m.group(1).strip() if m else None
+
+
+def _meta(html: str, name: str) -> Optional[str]:
+    m = re.search(
+        r'<meta[^>]+name=["\']%s["\'][^>]*content=["\']([^"\']+)["\']'
+        % re.escape(name),
+        html,
+        re.IGNORECASE,
+    )
+    if not m:
+        m = re.search(
+            r'<meta[^>]+content=["\']([^"\']+)["\'][^>]*name=["\']%s["\']'
+            % re.escape(name),
+            html,
+            re.IGNORECASE,
+        )
+    return m.group(1).strip() if m else None
+
+
+def _favicon(html: str, base: str) -> Optional[str]:
+    m = re.search(
+        r'<link[^>]+rel=["\'][^"\']*icon[^"\']*["\'][^>]*href=["\']([^"\']+)["\']',
+        html,
+        re.IGNORECASE,
+    )
+    if m:
+        return urljoin(base, m.group(1).strip())
+    m = re.search(
+        r'<link[^>]+href=["\']([^"\']+)["\'][^>]*rel=["\'][^"\']*icon[^"\']*["\']',
+        html,
+        re.IGNORECASE,
+    )
+    return urljoin(base, m.group(1).strip()) if m else None
+
+
+@api.get("/link/preview")
+async def link_preview(url: str, user=Depends(current_user)):
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise HTTPException(status_code=400, detail="Invalid URL")
+
+    now = _time.time()
+    cached = LINK_CACHE.get(url)
+    if cached and now - cached["at"] < LINK_CACHE_TTL:
+        return cached["data"]
+
+    base = f"{parsed.scheme}://{parsed.netloc}"
+    result = {
+        "url": url,
+        "domain": parsed.netloc,
+        "title": parsed.netloc,
+        "description": None,
+        "image": None,
+        "favicon": f"{base}/favicon.ico",
+    }
+
+    try:
+        async with httpx.AsyncClient(
+            follow_redirects=True,
+            timeout=8.0,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (compatible; XYTEEENexus/1.0; "
+                    "+https://xyteee.com link-preview)"
+                ),
+                "Accept-Language": "en-US,en;q=0.9",
+            },
+        ) as client:
+            r = await client.get(url)
+            if r.status_code >= 400:
+                raise RuntimeError(f"HTTP {r.status_code}")
+            html = r.text[:1_500_000]
+
+        title = _og(html, "title") or _meta(html, "twitter:title")
+        if not title:
+            tm = re.search(r"<title[^>]*>(.*?)</title>", html, re.IGNORECASE | re.DOTALL)
+            if tm:
+                title = re.sub(r"\s+", " ", tm.group(1)).strip()
+        if title:
+            result["title"] = title[:200]
+
+        desc = _og(html, "description") or _meta(html, "description") or _meta(html, "twitter:description")
+        if desc:
+            result["description"] = desc[:400]
+
+        img = _og(html, "image") or _meta(html, "twitter:image")
+        if img:
+            result["image"] = urljoin(base, img.strip())
+
+        favicon = _favicon(html, base)
+        if favicon:
+            result["favicon"] = favicon
+    except Exception as e:
+        logger.info("link preview failed for %s: %s", url, e)
+
+    LINK_CACHE[url] = {"at": now, "data": result}
+    return result
 
 
 # ── Admin ──────────────────────────────────────────────────────────────────────
@@ -4538,6 +4875,8 @@ async def report_reasons(user=Depends(current_user)):
 # ── Startup ────────────────────────────────────────────────────────────────────
 @app.on_event("startup")
 async def startup():
+    if not _PRESENCE_SWEEPER_STARTED:
+        asyncio.create_task(_presence_sweeper())
     # Ensure badge_type column exists (graceful check on startup)
     try:
         await run(lambda: sb.table("users").select("badge_type").limit(1).execute())

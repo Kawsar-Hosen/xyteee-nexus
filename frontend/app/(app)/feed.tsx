@@ -8,8 +8,10 @@ import {
   RefreshControl,
   ActivityIndicator,
   Platform,
+  Image,
 } from "react-native";
 import { useRouter, useFocusEffect } from "expo-router";
+import { useVideoPlayer, VideoView } from "expo-video";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import dayjs from "dayjs";
@@ -174,9 +176,11 @@ export default function Feed() {
     }
   }, [token]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load])
+  );
 
   useEffect(() => {
     return subscribe((e) => {
@@ -563,10 +567,12 @@ function StoriesRow({
           style={styles.storyItem}
         >
           <StoryRing size={STORY_SIZE}>
-            <Avatar
-              uri={myThumb?.kind === "image" && myThumb?.media ? myThumb.media : myStories.user.profile_picture}
-              name="Your story"
+            <StoryThumb
+              uri={myThumb?.media}
+              kind={myThumb?.kind}
               size={STORY_SIZE}
+              fallbackUri={myStories.user.profile_picture}
+              fallbackName="Your story"
             />
           </StoryRing>
           <NxText
@@ -582,7 +588,10 @@ function StoriesRow({
       {/* ── Friends' stories ─────────────────────────── */}
       {others.map((g) => {
         const thumb = g.stories?.[0];
-        const hasImage = thumb?.kind === "image" && thumb?.media;
+        const unviewed = (g.stories || []).some(
+          (s: any) =>
+            !(s.viewers || []).some((v: any) => v?.user_id === meId)
+        );
         return (
           <TouchableOpacity
             key={g.user.user_id}
@@ -592,11 +601,13 @@ function StoriesRow({
             style={styles.storyItem}
           >
             <View>
-              <StoryRing size={STORY_SIZE}>
-                <Avatar
-                  uri={hasImage ? thumb.media : g.user.profile_picture}
-                  name={g.user.display_name}
+              <StoryRing size={STORY_SIZE} highlighted={unviewed}>
+                <StoryThumb
+                  uri={thumb?.media}
+                  kind={thumb?.kind}
                   size={STORY_SIZE}
+                  fallbackUri={g.user.profile_picture}
+                  fallbackName={g.user.display_name}
                 />
               </StoryRing>
               {g.user.online ? (
@@ -637,17 +648,54 @@ function StoriesRow({
 function StoryRing({
   size,
   children,
+  highlighted,
 }: {
   size: number;
   children: React.ReactNode;
+  highlighted?: boolean;
 }) {
   const { colors } = useTheme();
+  const outer = size + 8;
+
+  const inner = (
+    <View
+      style={{
+        width: size,
+        height: size,
+        borderRadius: size / 2,
+        overflow: "hidden",
+        backgroundColor: "#000",
+      }}
+    >
+      {children}
+    </View>
+  );
+
+  if (highlighted) {
+    return (
+      <View
+        style={{
+          width: outer,
+          height: outer,
+          borderRadius: outer / 2,
+          padding: 2,
+          alignItems: "center",
+          justifyContent: "center",
+          borderWidth: 2,
+          borderColor: "#23A55A",
+        }}
+      >
+        {inner}
+      </View>
+    );
+  }
+
   return (
     <View
       style={{
-        width: size + 8,
-        height: size + 8,
-        borderRadius: (size + 8) / 2,
+        width: outer,
+        height: outer,
+        borderRadius: outer / 2,
         padding: 3,
         alignItems: "center",
         justifyContent: "center",
@@ -656,18 +704,54 @@ function StoryRing({
         borderColor: colors.border,
       }}
     >
-      <View
-        style={{
-          width: size,
-          height: size,
-          borderRadius: size / 2,
-          overflow: "hidden",
-          backgroundColor: "#000",
-        }}
-      >
-        {children}
-      </View>
+      {inner}
     </View>
+  );
+}
+
+function StoryThumb({
+  uri,
+  kind,
+  size,
+  fallbackUri,
+  fallbackName,
+}: {
+  uri?: string;
+  kind?: string;
+  size: number;
+  fallbackUri?: string;
+  fallbackName?: string;
+}) {
+  if (kind === "video" && uri) {
+    return <VideoStoryThumb uri={uri} size={size} />;
+  }
+
+  if (uri) {
+    return (
+      <Image
+        source={{ uri }}
+        style={{ width: size, height: size }}
+        resizeMode="cover"
+      />
+    );
+  }
+
+  return <Avatar uri={fallbackUri} name={fallbackName} size={size} />;
+}
+
+function VideoStoryThumb({ uri, size }: { uri: string; size: number }) {
+  const player = useVideoPlayer(uri, (p) => {
+    p.loop = true;
+    p.muted = true;
+    p.pause();
+  });
+  return (
+    <VideoView
+      player={player}
+      style={{ width: size, height: size }}
+      contentFit="cover"
+      nativeControls={false}
+    />
   );
 }
 

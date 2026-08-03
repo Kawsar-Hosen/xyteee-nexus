@@ -51,6 +51,9 @@ import { useChatSettings, CHAT_THEMES, CHAT_WALLPAPERS } from "@/src/hooks/useCh
 import { NxText } from "@/src/components/NxText";
 import { Avatar } from "@/src/components/Avatar";
 import { VoiceBubble } from "@/src/components/VoiceBubble";
+import { LinkPreview } from "@/src/components/LinkPreview";
+import { LiveLocationCard } from "@/src/components/LiveLocationCard";
+import { startLiveLocation, stopLiveLocation } from "@/src/utils/liveLocation";
 import { useVoiceRecorder } from "@/src/hooks/useVoiceRecorder";
 import { usePrivateVoiceCall, formatCallDuration } from "@/src/hooks/usePrivateVoiceCall";
 import { usePrivateVideoCall } from "@/src/hooks/usePrivateVideoCall";
@@ -59,6 +62,13 @@ import { fonts, radii, spacing } from "@/src/theme";
 import { VerifiedBadge } from "@/src/components/VerifiedBadge";
 
 const REACTIONS = ["❤️", "😂", "🔥", "😮", "😢", "👏", "👍"];
+
+const LIVE_DURATIONS = [
+  { label: "15 minutes", ms: 15 * 60 * 1000 },
+  { label: "30 minutes", ms: 30 * 60 * 1000 },
+  { label: "1 hour", ms: 60 * 60 * 1000 },
+  { label: "8 hours", ms: 8 * 60 * 60 * 1000 },
+];
 
 type Reaction = { user_id: string; emoji: string; at?: string };
 
@@ -143,6 +153,7 @@ export default function ChatScreen() {
   const [showSearch, setShowSearch] = useState(false);
   const [searchQ, setSearchQ] = useState("");
   const [showAttachMenu, setShowAttachMenu] = useState(false);
+  const [showLiveDuration, setShowLiveDuration] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [inputBarHeight, setInputBarHeight] = useState(62);
   const listRef = useRef<FlatList>(null);
@@ -312,6 +323,13 @@ export default function ChatScreen() {
         setMessages((prev) => prev.map((m) => (m.message_id === e.message_id ? { ...m, deleted_for_everyone: true, content: "", media: null, kind: "deleted" } : m)));
       } else if (e.type === "message_pin" && e.message?.conversation_id === conversation_id) {
         setMessages((prev) => prev.map((m) => (m.message_id === e.message.message_id ? e.message : m)));
+      } else if (
+        (e.type === "live_location_update" || e.type === "live_location_end") &&
+        e.conversation_id === conversation_id
+      ) {
+        setMessages((prev) =>
+          prev.map((m) => (m.message_id === e.message_id ? { ...m, content: e.content } : m))
+        );
       } else if (e.type === "chat_cleared" && e.conversation_id === conversation_id) {
         setMessages([]);
       } else if (e.type === "conversation_deleted" && e.conversation_id === conversation_id) {
@@ -453,55 +471,115 @@ export default function ChatScreen() {
   };
 
   /* ── Share live location ────────────────────────────────────────── */
-  const shareLocation = async () => {
+  const shareLocation = () => {
     setShowAttachMenu(false);
+    setShowLiveDuration(true);
+  };
+
+  const pickDuration = async (durationMs: number) => {
+    setShowLiveDuration(false);
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") {
+      let lat: number;
+      let lng: number;
+      if (Platform.OS === "web") {
+        const pos = await Promise.race([
+          Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.Balanced,
+          }),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("Location request timed out")), 12000)
+          ),
+        ]);
+        lat = pos.coords.latitude;
+        lng = pos.coords.longitude;
+      } else {
+        try {
+          const { status } = await Location.requestForegroundPermissionsAsync();
+          if (status !== "granted") {
+            Alert.alert("Location permission", "Location access is needed to share your position.");
+            return;
+          }
+        } catch {}
+        const pos = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        });
+        lat = pos.coords.latitude;
+        lng = pos.coords.longitude;
+      }
+      await sendLiveLocation(Number(lat.toFixed(6)), Number(lng.toFixed(6)), durationMs);
+    } catch (e: any) {
+      if (e?.code === 1 || e?.code === "E_LOCATION_PERMISSION_DENIED") {
         Alert.alert("Location permission", "Location access is needed to share your position.");
         return;
       }
-      const pos = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
-      const { latitude, longitude } = pos.coords;
-      const content = JSON.stringify({
-        lat: Number(latitude.toFixed(6)),
-        lng: Number(longitude.toFixed(6)),
-      });
-
-      const body: any = { conversation_id, content, kind: "location" };
-      if (replyTo) body.reply_to = replyTo.message_id;
-
-      setReplyTo(null);
-      emitTyping(false);
-
-      const tempId = `temp-${Date.now()}`;
-      const optimisticMessage: any = {
-        message_id: tempId,
-        conversation_id,
-        sender_id: user?.user_id,
-        content,
-        kind: "location",
-        media: null,
-        created_at: new Date().toISOString(),
-        read_by: [user?.user_id].filter(Boolean),
-        reply_to: replyTo || null,
-        reactions: [],
-      };
-      setMessages((prev) => [...prev, optimisticMessage]);
-      playSendSound();
-
-      try {
-        const sent = await api<Msg>("/chats/message", { method: "POST", body, token: token! });
-        setMessages((prev) => prev.map((m) => (m.message_id === tempId ? sent : m)));
-      } catch {
-        setMessages((prev) => prev.filter((m) => m.message_id !== tempId));
+      if (e?.code === 2 || e?.code === "E_LOCATION_UNAVAILABLE") {
+        Alert.alert("Location unavailable", "Your browser couldn't determine your location.");
+        return;
       }
-    } catch (e: any) {
-      if (e?.message?.includes("permission") || e?.code === "E_LOCATION_PERMISSION_DENIED") return;
-      Alert.alert("Couldn't get location", "Unable to access your location right now.");
+      Alert.alert(
+        "Couldn't get location",
+        e?.message && String(e.message) !== "undefined"
+          ? String(e.message)
+          : "Unable to access your location right now."
+      );
     }
+  };
+
+  const sendLiveLocation = async (lat: number, lng: number, durationMs: number) => {
+    const startedAt = Date.now();
+    const expiresAt = startedAt + durationMs;
+    const content = JSON.stringify({
+      lat,
+      lng,
+      started_at: new Date(startedAt).toISOString(),
+      expires_at: new Date(expiresAt).toISOString(),
+    });
+
+    const body: any = { conversation_id, content, kind: "live_location" };
+    if (replyTo) body.reply_to = replyTo.message_id;
+
+    setReplyTo(null);
+    emitTyping(false);
+
+    const tempId = `temp-${Date.now()}`;
+    const optimisticMessage: any = {
+      message_id: tempId,
+      conversation_id,
+      sender_id: user?.user_id,
+      content,
+      kind: "live_location",
+      media: null,
+      created_at: new Date().toISOString(),
+      read_by: [user?.user_id].filter(Boolean),
+      reply_to: replyTo || null,
+      reactions: [],
+    };
+    setMessages((prev) => [...prev, optimisticMessage]);
+    playSendSound();
+
+    try {
+      const sent = await api<Msg>("/chats/message", { method: "POST", body, token: token! });
+      setMessages((prev) => prev.map((m) => (m.message_id === tempId ? sent : m)));
+      startLiveLocation({
+        messageId: sent.message_id,
+        conversationId: conversation_id,
+        send,
+        lat,
+        lng,
+        expiresAt,
+      });
+    } catch {
+      setMessages((prev) => prev.filter((m) => m.message_id !== tempId));
+    }
+  };
+
+  const stopLiveSharing = (messageId: string) => {
+    stopLiveLocation(messageId);
+    send({
+      type: "live_location_end",
+      conversation_id,
+      message_id: messageId,
+    });
   };
 
   /* ── Voice recording ──────────────────────────────────────────────── */
@@ -518,10 +596,26 @@ export default function ChatScreen() {
     if (recState !== "recording") return;
     const result = await recStop();
     if (!result) return;
+
+    const tempId = `temp-${Date.now()}`;
+    const optimisticMessage: any = {
+      message_id: tempId,
+      conversation_id,
+      sender_id: user?.user_id,
+      content: result.durationStr,
+      kind: "voice",
+      media: result.uri,
+      created_at: new Date().toISOString(),
+      read_by: [user?.user_id].filter(Boolean),
+      reply_to: null,
+      reactions: [],
+    };
+    setMessages((prev) => [...prev, optimisticMessage]);
+    playSendSound();
     setSending(true);
     try {
       const url = await uploadFile(result.uri, "voice", token!, `voice_${Date.now()}.m4a`);
-      await api("/chats/message", {
+      const sent = await api<Msg>("/chats/message", {
         method: "POST",
         body: {
           conversation_id,
@@ -531,6 +625,10 @@ export default function ChatScreen() {
         },
         token: token!,
       });
+      setMessages((prev) => prev.map((m) => (m.message_id === tempId ? sent : m)));
+    } catch {
+      setMessages((prev) => prev.filter((m) => m.message_id !== tempId));
+      Alert.alert("Couldn't send voice", "Your voice message failed to send. Please try again.");
     } finally {
       setSending(false);
     }
@@ -988,6 +1086,7 @@ export default function ChatScreen() {
               sentBg={sentTheme}
               sentFg={sentThemeFg}
               showReadReceipts={chatSettings.readReceipts}
+              onStopLive={(mid) => stopLiveSharing(mid)}
             />
           )}
           keyboardShouldPersistTaps="handled"
@@ -1281,7 +1380,7 @@ export default function ChatScreen() {
                   numberOfLines={2}
                   style={{ color: colors.foreground, opacity: 0.85 }}
                 >
-                  {actionMsg.kind === "image" ? "📷 Photo" : actionMsg.kind === "voice" ? "🎙 Voice message" : actionMsg.kind === "location" ? "📍 Shared location" : actionMsg.content || ""}
+                  {actionMsg.kind === "image" ? "📷 Photo" : actionMsg.kind === "voice" ? "🎙 Voice message" : actionMsg.kind === "location" ? "📍 Shared location" : actionMsg.kind === "live_location" ? "📍 Live location" : actionMsg.content || ""}
                 </NxText>
               </View>
             ) : null}
@@ -1326,6 +1425,49 @@ export default function ChatScreen() {
                 hideHeader
               />
             </View>
+          </Animated.View>
+        </Pressable>
+      </Modal>
+
+      {/* ── Live location duration picker ────────────────────────────── */}
+      <Modal
+        visible={showLiveDuration}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowLiveDuration(false)}
+      >
+        <Pressable
+          style={styles.modalOverlay}
+          onPress={() => setShowLiveDuration(false)}
+        >
+          <Animated.View
+            entering={FadeInUp.duration(180)}
+            style={[styles.liveSheet, { backgroundColor: colors.surface, borderColor: colors.border }]}
+          >
+            <View style={styles.liveSheetHeader}>
+              <View style={[styles.liveSheetDot, Platform.OS === "web" ? ({ boxShadow: "0 0 0 4px rgba(239,68,68,0.25)" } as any) : { elevation: 2 }]} />
+              <NxText variant="label" style={{ marginLeft: 8 }}>Share live location</NxText>
+            </View>
+            <NxText style={{ color: colors.mutedFg, fontSize: 13, paddingBottom: spacing.sm }}>
+              How long should your friends see your location?
+            </NxText>
+            {LIVE_DURATIONS.map((d) => (
+              <TouchableOpacity
+                key={d.label}
+                testID={`live-duration-${d.label.replace(" ", "-")}`}
+                onPress={() => pickDuration(d.ms)}
+                style={[
+                  styles.liveOption,
+                  { borderColor: colors.border, backgroundColor: colors.background },
+                ]}
+              >
+                <Feather name="clock" size={17} color={colors.primary} />
+                <NxText style={{ marginLeft: 10, color: colors.foreground, fontSize: 15 }}>
+                  {d.label}
+                </NxText>
+                <Feather name="chevron-right" size={16} color={colors.mutedFg} />
+              </TouchableOpacity>
+            ))}
           </Animated.View>
         </Pressable>
       </Modal>
@@ -1422,6 +1564,7 @@ function MessageBubble({
   sentBg,
   sentFg,
   showReadReceipts = true,
+  onStopLive,
 }: {
   m: Msg;
   isMe: boolean;
@@ -1431,8 +1574,10 @@ function MessageBubble({
   sentBg?: string;
   sentFg?: string;
   showReadReceipts?: boolean;
+  onStopLive: (messageId: string) => void;
 }) {
   const { colors } = useTheme();
+  const { token } = useAuth();
   const { width: screenWidth } = useWindowDimensions();
   const bubbleBg = isMe ? sentBg || colors.bubbleSent : colors.bubbleRecv;
   const bubbleFg = isMe ? sentFg || colors.bubbleSentFg : colors.bubbleRecvFg;
@@ -1440,6 +1585,7 @@ function MessageBubble({
   const isVoice = m.kind === "voice" && !!m.media;
   const isImage = m.kind === "image" && !!m.media;
   const isLocation = m.kind === "location";
+  const isLiveLocation = m.kind === "live_location";
   const loc = useMemo(() => {
     if (!isLocation || !m.content) return null;
     try {
@@ -1448,18 +1594,38 @@ function MessageBubble({
     } catch {}
     return null;
   }, [isLocation, m.content]);
+  const liveData = useMemo(() => {
+    if (!isLiveLocation || !m.content) return null;
+    try {
+      const p = JSON.parse(m.content);
+      if (typeof p.lat === "number" && typeof p.lng === "number")
+        return p as { lat: number; lng: number; started_at?: string; expires_at?: string };
+    } catch {}
+    return null;
+  }, [isLiveLocation, m.content]);
   const isRead = (m.read_by?.length || 0) > 1;
   const time = dayjs(m.created_at).format("HH:mm");
   const [mapErr, setMapErr] = useState(false);
 
-  const openMapLink = () => {
-    if (!loc) return;
-    const url = `https://www.google.com/maps?q=${loc.lat},${loc.lng}`;
+  const linkUrl = useMemo(() => {
+    if (m.kind !== "text" || !m.content || m.content.length > 1000) return null;
+    const found = m.content.match(/\bhttps?:\/\/[^\s<>"')\]]+/gi);
+    return found ? found[0] : null;
+  }, [m.kind, m.content]);
+
+  const openLink = (url: string) => {
     if (Platform.OS === "web" && typeof window !== "undefined") {
       window.open(url, "_blank");
     } else {
       Linking.openURL(url).catch(() => {});
     }
+  };
+
+  const openMapLink = () => {
+    const target = loc || liveData;
+    if (!target) return;
+    const url = `https://www.google.com/maps?q=${target.lat},${target.lng}`;
+    openLink(url);
   };
 
   // Responsive max bubble width: 78% of screen, capped at 320px
@@ -1545,7 +1711,8 @@ function MessageBubble({
             onLongPress();
           }}
           onPress={() => {
-            if (isLocation && loc) openMapLink();
+            if ((isLocation || isLiveLocation) && (loc || liveData)) openMapLink();
+            else if (linkUrl) openLink(linkUrl);
           }}
           activeOpacity={0.82}
           testID={`msg-${m.message_id}`}
@@ -1575,8 +1742,8 @@ function MessageBubble({
                 bubbleRadius,
                 {
                   backgroundColor: bubbleBg,
-                  paddingVertical: isImage || isLocation ? 4 : 11,
-                  paddingHorizontal: isImage || isLocation ? 4 : 15,
+                  paddingVertical: isImage || isLocation || isLiveLocation ? 4 : 11,
+                  paddingHorizontal: isImage || isLocation || isLiveLocation ? 4 : 15,
                   ...(!isMe && !isImage && !isDeleted && !isLocation
                     ? { borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border }
                     : {}),
@@ -1614,6 +1781,8 @@ function MessageBubble({
                       ? "📷 Photo"
                       : replySource.kind === "location"
                       ? "📍 Shared location"
+                      : replySource.kind === "live_location"
+                      ? "📍 Live location"
                       : replySource.content
                       ? replySource.content.slice(0, 80)
                       : "Message"}
@@ -1690,17 +1859,48 @@ function MessageBubble({
                     <Feather name="external-link" size={13} color={bubbleFg} style={{ opacity: 0.7 }} />
                   </View>
                 </View>
+              ) : isLiveLocation && liveData ? (
+                <LiveLocationCard
+                  data={liveData}
+                  isOwner={isMe}
+                  fg={bubbleFg}
+                  muted={bubbleFg}
+                  width={imageSize}
+                  onOpen={openMapLink}
+                  onStop={() => onStopLive(m.message_id)}
+                />
               ) : (
-                <NxText
-                  style={{
-                    color: bubbleFg,
-                    fontSize: 15,
-                    lineHeight: 22,
-                    fontFamily: isMe ? fonts.bodyMedium : fonts.body,
-                  }}
-                >
-                  {m.content}
-                </NxText>
+                <View>
+                  <NxText
+                    style={{
+                      color: bubbleFg,
+                      fontSize: 15,
+                      lineHeight: 22,
+                      fontFamily: isMe ? fonts.bodyMedium : fonts.body,
+                    }}
+                  >
+                    {m.content}
+                  </NxText>
+                  {linkUrl ? (
+                    <View style={{ marginTop: 8 }}>
+                      <LinkPreview
+                        url={linkUrl}
+                        token={token}
+                        bg={
+                          isMe
+                            ? "rgba(0,0,0,0.14)"
+                            : "rgba(255,255,255,0.07)"
+                        }
+                        fg={bubbleFg}
+                        muted={
+                          isMe
+                            ? "rgba(0,0,0,0.6)"
+                            : "rgba(255,255,255,0.62)"
+                        }
+                      />
+                    </View>
+                  ) : null}
+                </View>
               )}
 
               {/* Time + tick */}
@@ -2015,6 +2215,23 @@ const styles = StyleSheet.create({
     backgroundColor: "#2DBE72",
   },
   modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "flex-end" },
+  liveSheet: { padding: spacing.lg, borderTopLeftRadius: 24, borderTopRightRadius: 24, borderWidth: 1 },
+  liveSheetHeader: { flexDirection: "row", alignItems: "center", paddingBottom: spacing.xs },
+  liveSheetDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: "#DC2626",
+  },
+  liveOption: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 8,
+  },
   reactionsBar: {
     flexDirection: "row", alignItems: "center", justifyContent: "space-around",
     paddingHorizontal: 8, paddingVertical: 6, marginHorizontal: 20, marginBottom: 14,

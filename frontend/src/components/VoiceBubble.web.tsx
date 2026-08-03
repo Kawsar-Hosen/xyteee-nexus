@@ -55,6 +55,7 @@ export function VoiceBubble({
   const { colors } = useTheme();
   const [playing, setPlaying] = useState(false);
   const [posMs, setPosMs] = useState(0);
+  const [failed, setFailed] = useState(false);
   const [durMs, setDurMs] = useState(() => parseDuration(duration || "0:00") * 1000);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const bars = seededBars(messageId, BAR_COUNT);
@@ -62,20 +63,35 @@ export function VoiceBubble({
   const bg = isMe ? colors.primary : colors.surface;
   const border = isMe ? "transparent" : colors.border;
 
-  useEffect(() => () => { audioRef.current?.pause(); }, []);
+  useEffect(() => {
+    const el = document.createElement("audio");
+    el.preload = "metadata";
+    el.src = mediaUri;
+    el.onloadedmetadata = () => setDurMs(el.duration * 1000);
+    el.ontimeupdate = () => setPosMs(el.currentTime * 1000);
+    el.onended = () => { setPlaying(false); setPosMs(0); };
+    el.onerror = () => setFailed(true);
+    document.body.appendChild(el);
+    audioRef.current = el;
+    return () => {
+      el.pause();
+      el.src = "";
+      try { document.body.removeChild(el); } catch {}
+    };
+  }, [mediaUri]);
 
   const togglePlay = () => {
+    const el = audioRef.current;
+    if (!el) return;
     if (playing) {
-      audioRef.current?.pause();
+      el.pause();
       setPlaying(false);
       return;
     }
-    const audio = new Audio(mediaUri);
-    audioRef.current = audio;
-    audio.onloadedmetadata = () => setDurMs(audio.duration * 1000);
-    audio.ontimeupdate = () => setPosMs(audio.currentTime * 1000);
-    audio.onended = () => { setPlaying(false); setPosMs(0); };
-    audio.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
+    setFailed(false);
+    el.play()
+      .then(() => setPlaying(true))
+      .catch(() => setFailed(true));
   };
 
   const progress = durMs > 0 ? Math.min(posMs / durMs, 1) : 0;
@@ -84,7 +100,7 @@ export function VoiceBubble({
   return (
     <View style={[styles.wrap, { backgroundColor: bg, borderColor: border }]}>
       <TouchableOpacity onPress={togglePlay} style={[styles.playBtn, { backgroundColor: tint + "22" }]}>
-        <Feather name={playing ? "pause" : "play"} size={20} color={tint} />
+        <Feather name={failed ? "alert-triangle" : playing ? "pause" : "play"} size={20} color={failed ? "#DC2626" : tint} />
       </TouchableOpacity>
       <View style={{ flex: 1 }}>
         <View style={styles.bars}>
@@ -92,8 +108,8 @@ export function VoiceBubble({
             <AnimatedBar key={i} height={h} filled={i <= fillIdx} playing={playing} tint={tint} delay={i * 40} />
           ))}
         </View>
-        <NxText style={[styles.dur, { color: tint }]}>
-          {playing && posMs > 0 ? fmt(posMs) : fmt(durMs)}
+        <NxText style={[styles.dur, { color: failed ? "#DC2626" : tint }]}>
+          {failed ? "Couldn't play" : playing && posMs > 0 ? fmt(posMs) : fmt(durMs)}
         </NxText>
       </View>
     </View>
