@@ -419,6 +419,54 @@ async def _send_expo_push(to_user: str, kind: str, data: dict):
         result = response.json()
         logger.info("Expo push response for %s: %s", to_user, result)
 
+    # Clean up invalid device tokens (e.g. DeviceNotRegistered after the app
+    # was uninstalled) so future sends don't keep targeting dead devices.
+    data = result.get("data") or []
+    pending_receipts: Dict[str, str] = {}
+    for i, ticket in enumerate(data):
+        token = messages[i]["to"] if i < len(messages) else None
+        status = ticket.get("status")
+        details = ticket.get("details") or {}
+        if status == "ok" and ticket.get("id") and token:
+            pending_receipts[ticket["id"]] = token
+        elif (
+            status == "error"
+            and details.get("error") == "DeviceNotRegistered"
+            and token
+        ):
+            await _delete_push_token(token)
+    if pending_receipts:
+        asyncio.ensure_future(_cleanup_push_receipts(pending_receipts))
+
+
+async def _delete_push_token(expo_push_token: str):
+    await run(lambda: sb.table("push_tokens")
+        .delete()
+        .eq("expo_push_token", expo_push_token)
+        .execute())
+
+
+async def _cleanup_push_receipts(tickets_by_token: Dict[str, str]):
+    """Poll Expo for push delivery receipts and drop invalid device tokens."""
+    await asyncio.sleep(60)
+    try:
+        ids = list(tickets_by_token.keys())
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                "https://exp.host/--/api/v2/push/getReceipts",
+                json={"ids": ids},
+            )
+            resp.raise_for_status()
+            receipts = (resp.json() or {}).get("data") or {}
+        for tid, token in tickets_by_token.items():
+            r = receipts.get(tid) or {}
+            if r.get("status") == "error":
+                details = r.get("details") or {}
+                if details.get("error") == "DeviceNotRegistered":
+                    await _delete_push_token(token)
+    except Exception as e:
+        logger.warning("push receipt cleanup failed: %s", e)
+
 
 # ── Auth dependency ────────────────────────────────────────────────────────────
 async def current_user(authorization: Optional[str] = Header(None)) -> dict:
