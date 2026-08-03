@@ -11,7 +11,6 @@ import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as WebBrowser from "expo-web-browser";
 import * as Google from "expo-auth-session/providers/google";
-import { makeRedirectUri } from "expo-auth-session";
 
 import { useTheme } from "@/src/context/ThemeContext";
 import { useAuth } from "@/src/context/AuthContext";
@@ -30,14 +29,15 @@ export default function Welcome() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
-  const redirectUri = makeRedirectUri({
-    scheme: "xyteeenexus",
-  });
+  const GOOGLE_ANDROID_CLIENT_ID = "940343114841-mj0qgb95o1cjsud59j4isb6tp4jm6v2h.apps.googleusercontent.com";
+  const GOOGLE_WEB_CLIENT_ID = "940343114841-1jv65pbtqmurbl1hoacnre2iqoqtgq48.apps.googleusercontent.com";
+
+  const redirectUri = `com.googleusercontent.apps.${GOOGLE_ANDROID_CLIENT_ID}:/oauth2redirect`;
 
   const [, googleResponse, promptGoogleAsync] = Google.useIdTokenAuthRequest({
     redirectUri,
-    androidClientId: "940343114841-mj0qgb95o1cjsud59j4isb6tp4jm6v2h.apps.googleusercontent.com",
-    webClientId: "940343114841-1jv65pbtqmurbl1hoacnre2iqoqtgq48.apps.googleusercontent.com",
+    androidClientId: GOOGLE_ANDROID_CLIENT_ID,
+    webClientId: GOOGLE_WEB_CLIENT_ID,
   });
 
   React.useEffect(() => {
