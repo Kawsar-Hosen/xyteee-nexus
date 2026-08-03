@@ -36,7 +36,7 @@ export default function Welcome() {
 
   const [, googleResponse, promptGoogleAsync] = Google.useIdTokenAuthRequest({
     redirectUri,
-    androidClientId: "940343114841-mn3e2li540kf9m5jg5ckom6vst9d784h.apps.googleusercontent.com",
+    androidClientId: "940343114841-mj0qgb95o1cjsud59j4isb6tp4jm6v2h.apps.googleusercontent.com",
     webClientId: "940343114841-1jv65pbtqmurbl1hoacnre2iqoqtgq48.apps.googleusercontent.com",
   });
 
