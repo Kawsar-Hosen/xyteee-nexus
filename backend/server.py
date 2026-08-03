@@ -379,7 +379,8 @@ async def _send_expo_push(to_user: str, kind: str, data: dict):
         "circle_message": f"{from_name}: {data.get('preview') or 'Sent a message'}",
     }
 
-    # Call notifications use a dedicated high-priority channel and no category.
+    # Call notifications use a dedicated high-priority channel and the "call"
+    # category (Accept / Decline actions).
     # Message notifications attach the "message" category so the user can reply
     # inline from the lock screen / notification shade.
     is_call = kind in ("voice_call", "video_call")
@@ -396,8 +397,10 @@ async def _send_expo_push(to_user: str, kind: str, data: dict):
             "priority": "high" if is_call else "normal",
         }
         if is_call:
-            # Android: route to the calls channel (MAX importance, bypass DnD)
+            # Android: route to the calls channel (MAX importance, bypass DnD);
+            # category enables Accept / Decline actions on the notification.
             msg["channelId"] = "calls"
+            msg["categoryIdentifier"] = "call"
         elif is_message:
             # Android: route to default channel; add reply category on iOS
             msg["channelId"] = "default"
@@ -3722,9 +3725,46 @@ async def get_pending_voice_call(
         "call": {
             "conversation_id": pending["conversation_id"],
             "caller_id": pending["caller_id"],
+            "type": pending.get("type") or "voice",
             "sdp": pending["sdp"],
         }
     }
+
+
+# Decline a pending incoming call from a push notification action. The callee's
+# app may not be connected over WS yet, so clear the pending call server-side
+# and broadcast call_end to the other participants.
+@api.post("/calls/decline")
+async def decline_call(
+    conversation_id: str,
+    user=Depends(current_user),
+):
+    user_id = user["user_id"]
+    pending = pending_voice_calls.pop(user_id, None)
+    end_event = "video_call_end" if (pending or {}).get("type") == "video" else "call_end"
+
+    participants = typing_conversations.get(conversation_id, [])
+    if not participants:
+        cr = await run(
+            lambda: sb.table("conversations")
+            .select("participants")
+            .eq("conversation_id", conversation_id)
+            .limit(1)
+            .execute()
+        )
+        if cr.data:
+            participants = cr.data[0].get("participants", [])
+
+    for participant_id in participants:
+        if participant_id != user_id:
+            pending_voice_calls.pop(participant_id, None)
+            await hub.send(participant_id, {
+                "type": end_event,
+                "conversation_id": conversation_id,
+                "user_id": user_id,
+            })
+
+    return {"ok": True}
 
 
 # ── WebSocket ──────────────────────────────────────────────────────────────────
@@ -3957,17 +3997,22 @@ async def websocket_endpoint(ws: WebSocket, token: str):
                         typing_conversations[conv_id] = participants
 
                 if user_id in participants:
-                    if t == "call_offer":
+                    if t in {"call_offer", "video_call_offer"}:
+                        call_type = "voice" if t == "call_offer" else "video"
                         for participant_id in participants:
                             if participant_id != user_id:
                                 pending_voice_calls[participant_id] = {
                                     "conversation_id": conv_id,
                                     "caller_id": user_id,
+                                    "type": call_type,
                                     "sdp": data.get("sdp"),
-                                    "expires_at": now_utc() + timedelta(seconds=60),
+                                    "expires_at": now_utc() + timedelta(seconds=120),
                                 }
 
-                    elif t == "call_end":
+                    elif t in {"call_answer", "video_call_answer"}:
+                        pending_voice_calls.pop(user_id, None)
+
+                    elif t in {"call_end", "video_call_end"}:
                         for participant_id in participants:
                             pending_voice_calls.pop(participant_id, None)
                         pending_voice_calls.pop(user_id, None)
