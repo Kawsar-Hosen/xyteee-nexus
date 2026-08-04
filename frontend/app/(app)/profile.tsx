@@ -26,8 +26,8 @@ import { DOCK_PAD } from "@/src/theme/layout";
 
 const ADMIN_EMAIL = process.env.EXPO_PUBLIC_ADMIN_EMAIL || "smdkawsar2@gmail.com";
 const APP_VERSION = "1.0.0";
-const COVER_H = 230;
-const AVATAR_SIZE = 92;
+const COVER_H = 220;
+const AVATAR_SIZE = 96;
 
 function getProfileCompletion(user: any) {
   const checks = [
@@ -176,29 +176,29 @@ export default function Profile() {
             <Image source={{ uri: user.cover_picture }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
           ) : (
             <LinearGradient
-              colors={[colors.primaryDeep, colors.primary, `${colors.primary}55`]}
+              colors={[colors.primaryDeep, colors.primary, `${colors.primary}44`]}
               start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
               style={StyleSheet.absoluteFillObject}
             />
           )}
-          {/* Multi-layer overlay */}
+          {/* Subtle overlay */}
           <LinearGradient
-            colors={["rgba(0,0,0,0.18)", "transparent", "rgba(0,0,0,0.55)"]}
+            colors={["rgba(0,0,0,0.12)", "transparent", "rgba(0,0,0,0.45)"]}
             style={StyleSheet.absoluteFillObject}
           />
           {/* Bottom fade into background */}
           <LinearGradient
             colors={["transparent", colors.background]}
-            start={{ x: 0, y: 0.6 }} end={{ x: 0, y: 1 }}
+            start={{ x: 0, y: 0.65 }} end={{ x: 0, y: 1 }}
             style={StyleSheet.absoluteFillObject}
           />
 
-          {/* Header action buttons — settings only; share & theme are below */}
+          {/* Header action buttons */}
           <View style={styles.coverActions}>
-            <TouchableOpacity onPress={handleShare} style={[styles.glassBtn, { backgroundColor: "rgba(0,0,0,0.38)" }]}>
+            <TouchableOpacity onPress={handleShare} style={[styles.glassBtn, { backgroundColor: "rgba(0,0,0,0.35)" }]}>
               <Feather name="share-2" size={17} color="#fff" />
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => router.push("/settings")} style={[styles.glassBtn, { backgroundColor: "rgba(0,0,0,0.38)" }]}>
+            <TouchableOpacity onPress={() => router.push("/settings")} style={[styles.glassBtn, { backgroundColor: "rgba(0,0,0,0.35)" }]}>
               <Feather name="settings" size={17} color="#fff" />
             </TouchableOpacity>
           </View>
@@ -216,7 +216,6 @@ export default function Profile() {
               delayLongPress={400}
               style={styles.avatarWrap}
             >
-              {/* Plain avatar — no RGB gradient ring */}
               <View style={[styles.avatarInner, { backgroundColor: colors.background }]}>
                 <Avatar
                   uri={user.profile_picture}
@@ -229,7 +228,7 @@ export default function Profile() {
                   animationIntensity={user.profile_animation_intensity}
                 />
               </View>
-              {/* Edit overlay badge — taps directly open photo picker */}
+              {/* Edit overlay badge */}
               <TouchableOpacity
                 onPress={pickProfilePhoto}
                 disabled={uploadingPhoto}
@@ -258,42 +257,43 @@ export default function Profile() {
             </TouchableOpacity>
           )}
 
-          {/* Online status pill */}
-          <TouchableOpacity
-            onPress={() => setOnlineSheetOpen(true)}
-            activeOpacity={0.8}
-            style={[styles.statusPill, { backgroundColor: colors.surface, borderColor: colors.border }]}
-          >
-            <View style={[styles.statusDot, { backgroundColor: currentStatusColor }]} />
-            <NxText style={[styles.statusPillText, { color: colors.foreground }]}>
-              {user.online_status === "dnd" ? "Do Not Disturb"
-                : user.online_status === "invisible" ? "Invisible"
-                : user.online_status === "idle" ? "Idle"
-                : "Online"}
-            </NxText>
-            <Feather name="chevron-down" size={13} color={colors.mutedFg} />
-          </TouchableOpacity>
-
-          {/* Status note pill — beside the profile */}
-          <TouchableOpacity
-            onPress={() => router.push("/settings/status")}
-            activeOpacity={0.8}
-            style={[styles.notePill, { backgroundColor: colors.surface, borderColor: colors.border }]}
-          >
-            <View style={[styles.notePillIcon, { backgroundColor: colors.primary }]}>
-              <Feather name="edit-3" size={11} color={colors.onPrimary} />
-            </View>
-            {user.status_text ? (
-              <AnimatedStatusText color={colors.foreground} style={{ flexShrink: 1, fontSize: 13, lineHeight: 18 }}>
-                {user.status_text}
-              </AnimatedStatusText>
-            ) : (
-              <NxText style={[styles.notePillPlaceholder, { color: colors.mutedFg }]}>
-                Set a status…
+          {/* Status pills row */}
+          <View style={styles.statusPillsRow}>
+            {/* Online status pill */}
+            <TouchableOpacity
+              onPress={() => setOnlineSheetOpen(true)}
+              activeOpacity={0.8}
+              style={[styles.statusPill, { backgroundColor: colors.surface, borderColor: colors.border }]}
+            >
+              <View style={[styles.statusDot, { backgroundColor: currentStatusColor }]} />
+              <NxText style={[styles.statusPillText, { color: colors.foreground }]}>
+                {user.online_status === "dnd" ? "DND"
+                  : user.online_status === "invisible" ? "Invisible"
+                  : user.online_status === "idle" ? "Idle"
+                  : "Online"}
               </NxText>
-            )}
-            <Feather name="chevron-right" size={13} color={colors.mutedFg} />
-          </TouchableOpacity>
+              <Feather name="chevron-down" size={12} color={colors.mutedFg} />
+            </TouchableOpacity>
+
+            {/* Status note pill */}
+            <TouchableOpacity
+              onPress={() => router.push("/settings/status")}
+              activeOpacity={0.8}
+              style={[styles.statusPill, { backgroundColor: colors.surface, borderColor: colors.border }]}
+            >
+              <View style={[styles.notePillIcon, { backgroundColor: colors.primary }]}>
+                <Feather name="edit-3" size={10} color={colors.onPrimary} />
+              </View>
+              {user.status_text ? (
+                <AnimatedStatusText color={colors.foreground} style={{ flexShrink: 1, fontSize: 12, lineHeight: 16 }}>
+                  {user.status_text}
+                </AnimatedStatusText>
+              ) : (
+                <NxText style={[styles.statusPillText, { color: colors.mutedFg }]}>Status</NxText>
+              )}
+              <Feather name="chevron-right" size={12} color={colors.mutedFg} />
+            </TouchableOpacity>
+          </View>
         </Animated.View>
 
         {/* ═══════════════ STATS ═══════════════ */}
@@ -305,11 +305,6 @@ export default function Profile() {
             <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
             <StatCol value={sinceValue} label="Since" accent={colors.mutedFg} />
           </View>
-          <LinearGradient
-            colors={[colors.primary, "transparent"]}
-            start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-            style={styles.statsAccent}
-          />
         </Animated.View>
 
         {/* ═══════════════ ACTION ROW ═══════════════ */}
@@ -333,6 +328,11 @@ export default function Profile() {
             >
               <Feather name="bell" size={15} color={colors.foreground} />
               <NxText style={[styles.actionSecondaryLabel, { color: colors.foreground }]}>Alerts</NxText>
+              {notifCount > 0 && (
+                <View style={[styles.notifBadge, { backgroundColor: colors.primary }]}>
+                  <NxText style={styles.notifBadgeText}>{notifCount > 9 ? "9+" : notifCount}</NxText>
+                </View>
+              )}
             </TouchableOpacity>
             <TouchableOpacity
               onPress={handleShare}
@@ -816,7 +816,7 @@ function SettingRowItem({
       style={[styles.settingRow, !last && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border }]}
     >
       <View style={[styles.settingIcon, { backgroundColor: iconBg }]}>
-        <Feather name={icon} size={18} color={iconColor} strokeWidth={2.2} />
+        <Feather name={icon} size={16} color={iconColor} strokeWidth={2.2} />
       </View>
       <View style={styles.settingTextWrap}>
         <View style={styles.settingTitleRow}>
@@ -873,12 +873,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   glassBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: "center",
     justifyContent: "center",
-    backdropFilter: "blur(12px)" as any,
   },
 
   // Identity
@@ -914,48 +913,40 @@ const styles = StyleSheet.create({
   },
   displayName: {
     fontFamily: fonts.display,
-    fontSize: 24,
+    fontSize: 22,
     letterSpacing: 0.3,
   },
   username: {
     fontFamily: fonts.body,
-    fontSize: 14,
+    fontSize: 13,
     marginTop: 2,
+  },
+  statusPillsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginTop: spacing.sm,
+    flexWrap: "wrap",
+    justifyContent: "center",
   },
   statusPill: {
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    marginTop: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 7,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
     borderRadius: radii.pill,
     borderWidth: 1,
   },
-  statusDot: { width: 8, height: 8, borderRadius: 4 },
-  statusPillText: { fontFamily: fonts.bodyMedium, fontSize: 13 },
-
-  // Status note pill — beside the profile identity
-  notePill: {
-    flexDirection: "row",
-    alignItems: "center",
-    alignSelf: "center",
-    gap: 8,
-    marginTop: spacing.sm,
-    maxWidth: "86%",
-    borderWidth: 1,
-    borderRadius: radii.pill,
-    paddingHorizontal: 13,
-    paddingVertical: 8,
-  },
+  statusDot: { width: 7, height: 7, borderRadius: 4 },
+  statusPillText: { fontFamily: fonts.bodyMedium, fontSize: 12 },
   notePillIcon: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
     alignItems: "center",
     justifyContent: "center",
   },
-  notePillPlaceholder: { fontSize: 13, fontFamily: fonts.bodyMedium },
 
   // Stats
   statsCard: {
@@ -967,16 +958,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     paddingVertical: spacing.lg,
   },
-  statsAccent: {
-    height: 3,
-    marginHorizontal: spacing.lg + spacing.lg,
-    marginTop: -1.5,
-    opacity: 0.7,
-  },
   statCol: { flex: 1, alignItems: "center" },
-  statValue: { fontFamily: fonts.display, fontSize: 26, letterSpacing: 0.5, lineHeight: 32 },
-  statLabel: { fontFamily: fonts.body, fontSize: 12, color: "#888", marginTop: 3, letterSpacing: 0.8, textTransform: "uppercase" },
-  statDivider: { width: 1, height: 38 },
+  statValue: { fontFamily: fonts.display, fontSize: 24, letterSpacing: 0.5, lineHeight: 30 },
+  statLabel: { fontFamily: fonts.body, fontSize: 11, color: "#888", marginTop: 3, letterSpacing: 0.8, textTransform: "uppercase" },
+  statDivider: { width: 1, height: 36 },
 
   // Action row
   actionRow: {
@@ -989,17 +974,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
-    paddingVertical: 14,
+    paddingVertical: 13,
     borderRadius: radii.xl,
     shadowColor: "#000",
-    shadowOpacity: 0.16,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
     elevation: 3,
   },
   actionPrimaryLabel: {
     fontFamily: fonts.bodySemi,
-    fontSize: 15,
+    fontSize: 14,
   },
   actionSecondaryRow: {
     flexDirection: "row",
@@ -1011,14 +996,23 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 7,
-    paddingVertical: 12,
+    paddingVertical: 11,
     borderRadius: radii.xl,
     borderWidth: 1,
   },
   actionSecondaryLabel: {
     fontFamily: fonts.bodySemi,
-    fontSize: 14,
+    fontSize: 13,
   },
+  notifBadge: {
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 5,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  notifBadgeText: { color: "#fff", fontSize: 10, fontFamily: fonts.bodySemi },
 
   // Body pad
   bodyPad: { paddingHorizontal: spacing.lg, marginTop: spacing.md },
@@ -1028,16 +1022,16 @@ const styles = StyleSheet.create({
     borderRadius: radii.xl,
     borderWidth: 1,
     padding: spacing.md,
-    gap: 12,
+    gap: 10,
   },
-  inlineBio: { fontFamily: fonts.body, fontSize: 14, lineHeight: 21, textAlign: "center", marginTop: 6, paddingHorizontal: spacing.lg, maxWidth: 300 },
-  inlineBioPlaceholder: { fontFamily: fonts.body, fontSize: 13, fontStyle: "italic", marginTop: 5 },
+  inlineBio: { fontFamily: fonts.body, fontSize: 13, lineHeight: 20, textAlign: "center", marginTop: 4, paddingHorizontal: spacing.lg, maxWidth: 300 },
+  inlineBioPlaceholder: { fontFamily: fonts.body, fontSize: 12, fontStyle: "italic", marginTop: 4 },
   bioText: { fontFamily: fonts.body, fontSize: 14, lineHeight: 22 },
   bioPlaceholder: { fontFamily: fonts.body, fontSize: 14, fontStyle: "italic" },
 
-  metaRow: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
-  metaItem: { flexDirection: "row", alignItems: "center", gap: 5 },
-  metaText: { fontFamily: fonts.body, fontSize: 13 },
+  metaRow: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  metaItem: { flexDirection: "row", alignItems: "center", gap: 4 },
+  metaText: { fontFamily: fonts.body, fontSize: 12 },
 
   // Profile completion
   completionCard: {
@@ -1046,18 +1040,18 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     padding: spacing.md,
   },
-  completionTop: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 12 },
-  completionDot: { width: 8, height: 8, borderRadius: 4 },
-  completionTitle: { fontFamily: fonts.bodySemi, fontSize: 14 },
-  completionSub: { fontFamily: fonts.body, fontSize: 12, marginTop: 2 },
-  completionBtn: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: radii.pill },
-  progressTrack: { height: 5, borderRadius: 3, overflow: "hidden" },
-  progressFill: { height: 5, borderRadius: 3 },
+  completionTop: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 10 },
+  completionDot: { width: 7, height: 7, borderRadius: 4 },
+  completionTitle: { fontFamily: fonts.bodySemi, fontSize: 13 },
+  completionSub: { fontFamily: fonts.body, fontSize: 11, marginTop: 2 },
+  completionBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: radii.pill },
+  progressTrack: { height: 4, borderRadius: 2, overflow: "hidden" },
+  progressFill: { height: 4, borderRadius: 2 },
 
   // Gallery
   galleryThumb: {
-    width: 96,
-    height: 128,
+    width: 90,
+    height: 120,
     borderRadius: radii.lg,
     overflow: "hidden",
     borderWidth: 1,
@@ -1068,15 +1062,16 @@ const styles = StyleSheet.create({
   sectionLabelRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 7,
+    gap: 6,
     marginTop: spacing.xl,
-    marginBottom: 10,
+    marginBottom: 8,
   },
-  sectionDot: { width: 6, height: 6, borderRadius: 3 },
+  sectionDot: { width: 5, height: 5, borderRadius: 3 },
   sectionLabelText: {
-    fontSize: 11,
+    fontSize: 10,
     fontFamily: fonts.bodySemi,
     letterSpacing: 1.2,
+    textTransform: "uppercase",
   },
 
   // Menu card
@@ -1085,9 +1080,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     overflow: "hidden",
     shadowColor: "#000",
-    shadowOpacity: 0.06,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
     elevation: 2,
   },
 
@@ -1096,13 +1091,13 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: spacing.md,
-    paddingVertical: 12,
+    paddingVertical: 11,
     gap: 12,
   },
   settingIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 13,
+    width: 36,
+    height: 36,
+    borderRadius: 11,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -1110,23 +1105,23 @@ const styles = StyleSheet.create({
   settingTitleRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   settingLabel: {
     fontFamily: fonts.bodyMedium,
-    fontSize: 15,
+    fontSize: 14,
     flexShrink: 1,
   },
   settingSub: {
     fontFamily: fonts.body,
-    fontSize: 12,
+    fontSize: 11,
     marginTop: 2,
   },
   settingBadge: {
-    minWidth: 20,
-    height: 20,
-    borderRadius: 10,
-    paddingHorizontal: 6,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 5,
     alignItems: "center",
     justifyContent: "center",
   },
-  settingBadgeText: { color: "#fff", fontSize: 11, fontFamily: fonts.bodySemi },
+  settingBadgeText: { color: "#fff", fontSize: 10, fontFamily: fonts.bodySemi },
 
   // Sign out card
   signOutCard: {
@@ -1136,17 +1131,17 @@ const styles = StyleSheet.create({
     borderRadius: radii.xl,
     borderWidth: 1,
     paddingHorizontal: spacing.md,
-    paddingVertical: 14,
+    paddingVertical: 13,
   },
   signOutIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: 14,
+    width: 38,
+    height: 38,
+    borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
   },
-  signOutLabel: { fontFamily: fonts.bodySemi, fontSize: 15 },
-  signOutSub: { fontFamily: fonts.body, fontSize: 12, marginTop: 2, opacity: 0.65 },
+  signOutLabel: { fontFamily: fonts.bodySemi, fontSize: 14 },
+  signOutSub: { fontFamily: fonts.body, fontSize: 11, marginTop: 2, opacity: 0.65 },
 
   // Logout confirm modal
   confirmOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.6)", alignItems: "center", justifyContent: "center", padding: spacing.lg },

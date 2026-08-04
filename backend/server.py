@@ -3152,7 +3152,15 @@ async def list_chats(user=Depends(current_user)):
         ):
             unread_map[cid] = unread_map.get(cid, 0) + 1
 
-    # 5. Build output
+    # 5. Batch-fetch bonds — check if each other user is bonded with me
+    fr_r = await run(lambda: sb.table("friendships").select("a,b")
+        .or_(f"a.eq.{me},b.eq.{me}")
+        .execute())
+    bonded_ids = set()
+    for f in (fr_r.data or []):
+        bonded_ids.add(f["a"] if f["b"] == me else f["b"])
+
+    # 6. Build output
     out = []
     for c in conv_list:
         other_ids = [p for p in c["participants"] if p != me]
@@ -3162,6 +3170,7 @@ async def list_chats(user=Depends(current_user)):
             continue
         c["other_user"] = other_user
         c["unread"] = unread_map.get(c["conversation_id"], 0)
+        c["is_bonded"] = other in bonded_ids
         out.append(c)
 
     return {"chats": out}

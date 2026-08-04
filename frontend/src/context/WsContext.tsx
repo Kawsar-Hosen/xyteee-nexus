@@ -3,14 +3,8 @@ import React, { createContext, useContext, useEffect, useRef, useState, useCallb
 
 import { useAuth } from "@/src/context/AuthContext";
 
-// On web: production (Cloudflare Pages) has no backend — point WebSockets at the
-// explicit backend URL, same as the REST client. Local web goes through the proxy
-// (port 5000), so use a relative /api/ws. On native use the backend URL env var.
-const isWeb = Platform.OS === "web";
-const isProd = isWeb && typeof window !== "undefined" && !window.location.hostname.includes("localhost");
-const BASE = isWeb
-  ? (isProd ? (process.env.EXPO_PUBLIC_BACKEND_URL ?? "") : "")
-  : (process.env.EXPO_PUBLIC_BACKEND_URL ?? "");
+// Local UI development and production both use the deployed backend.
+const BASE = process.env.EXPO_PUBLIC_BACKEND_URL ?? "";
 
 export type WsEvent =
   | { type: "circle_message"; circle_id: string; message: any }
@@ -79,7 +73,6 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
 
   const connect = useCallback(() => {
     if (!token || suppressedRef.current) return;
-    // Web production: backend URL env var. Local web / native: same logic as REST.
     const wsBase = BASE
       ? BASE.replace(/^http/, "ws")
       : `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}`;

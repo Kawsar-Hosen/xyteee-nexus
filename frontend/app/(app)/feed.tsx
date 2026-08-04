@@ -57,6 +57,7 @@ type Chat = {
   last_message?: string | null;
   last_message_at?: string;
   unread: number;
+  is_bonded?: boolean;
   other_user: {
     user_id: string;
     display_name: string;
@@ -99,6 +100,7 @@ export default function Feed() {
     () => feedCache?.notifCount || 0
   );
   const [typingChats, setTypingChats] = useState<Record<string, boolean>>({});
+  const [showRequests, setShowRequests] = useState(false);
   const [loading, setLoading] = useState(() => feedCache === null);
   const [refreshing, setRefreshing] = useState(false);
   const loadingRef = useRef(false);
@@ -340,7 +342,7 @@ export default function Feed() {
         <FeedSkeleton />
       ) : (
         <FlatList
-          data={chats}
+          data={chats.filter((c) => c.is_bonded !== false)}
           keyExtractor={(c) => c.conversation_id}
           renderItem={({ item }) => (
             <ChatRow
@@ -397,6 +399,81 @@ export default function Feed() {
                 onCreate={() => router.push("/story/create")}
                 onOpen={(uid) => router.push(`/story/${uid}`)}
               />
+              {(() => {
+                const requestChats = chats.filter((c) => c.is_bonded === false);
+                const totalUnread = requestChats.reduce((sum, c) => sum + c.unread, 0);
+                if (requestChats.length === 0) return null;
+                return (
+                  <View style={[styles.sectionHead, { marginTop: spacing.xl }]}>
+                    <TouchableOpacity
+                      activeOpacity={0.7}
+                      onPress={() => setShowRequests((s) => !s)}
+                      style={{
+                        flex: 1,
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 10,
+                        backgroundColor: colors.surface,
+                        borderRadius: 14,
+                        padding: 14,
+                        borderWidth: StyleSheet.hairlineWidth,
+                        borderColor: colors.border,
+                      }}
+                    >
+                      <View style={{
+                        width: 38,
+                        height: 38,
+                        borderRadius: 19,
+                        backgroundColor: colors.primary + "18",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}>
+                        <Feather name="user-plus" size={18} color={colors.primary} />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <NxText variant="body" style={{ color: colors.foreground, fontFamily: fonts.bodySemi }}>
+                          Message Requests
+                        </NxText>
+                        <NxText variant="caption" style={{ color: colors.mutedFg, marginTop: 1 }}>
+                          You have {requestChats.length} request{requestChats.length > 1 ? "s" : ""}{totalUnread > 0 ? `, ${totalUnread} unread` : ""}
+                        </NxText>
+                      </View>
+                      <Feather name={showRequests ? "chevron-up" : "chevron-down"} size={18} color={colors.mutedFg} />
+                    </TouchableOpacity>
+                  </View>
+                );
+              })()}
+              {showRequests && chats.filter((c) => c.is_bonded === false).map((chat) => (
+                <RequestChatRow
+                  key={chat.conversation_id}
+                  chat={chat}
+                  isTyping={!!typingChats[chat.conversation_id]}
+                  onPress={() => {
+                    setChats((current) => {
+                      const nextChats = current.map((c) =>
+                        c.conversation_id === chat.conversation_id
+                          ? { ...c, unread: 0 }
+                          : c
+                      );
+                      if (feedCache) feedCache.chats = nextChats;
+                      return nextChats;
+                    });
+                    router.push({
+                      pathname: "/chat/[id]",
+                      params: {
+                        id: chat.conversation_id,
+                        userId: chat.other_user?.user_id || "",
+                        displayName: chat.other_user?.display_name || "",
+                        profilePicture: chat.other_user?.profile_picture || "",
+                        badgeType: chat.other_user?.badge_type || "",
+                        online: chat.other_user?.online ? "1" : "0",
+                        onlineStatus: chat.other_user?.online_status || "online",
+                        lastSeen: chat.other_user?.last_seen || "",
+                      },
+                    });
+                  }}
+                />
+              ))}
               <View style={[styles.sectionHead, { marginTop: spacing.xl }]}>
                 <View style={styles.sectionTitleRow}>
                   <View style={[styles.sectionAccent, { backgroundColor: colors.primary }]} />
@@ -895,6 +972,96 @@ function ChatRow({
                   ? colors.foreground
                   : colors.mutedFg,
               fontFamily: isTyping || hasUnread ? fonts.bodySemi : undefined,
+            }}
+          >
+            {preview}
+          </NxText>
+
+          {hasUnread ? (
+            <View style={[styles.unread, { backgroundColor: colors.primary }]}>
+              <NxText
+                style={{
+                  color: colors.onPrimary,
+                  fontSize: 10,
+                  fontFamily: fonts.bodySemi,
+                }}
+              >
+                {chat.unread > 99 ? "99+" : chat.unread}
+              </NxText>
+            </View>
+          ) : null}
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+function RequestChatRow({
+  chat,
+  isTyping,
+  onPress,
+}: {
+  chat: Chat;
+  isTyping: boolean;
+  onPress: () => void;
+}) {
+  const { colors } = useTheme();
+  const [revealed, setRevealed] = useState(false);
+  const preview = isTyping ? "Typing…" : getSmartPreview(chat.last_message);
+  const time = getCompactTime(chat.last_message_at);
+  const hasUnread = chat.unread > 0;
+
+  return (
+    <TouchableOpacity
+      testID={`request-chat-row-${chat.conversation_id}`}
+      onPress={() => {
+        if (!revealed) {
+          setRevealed(true);
+          return;
+        }
+        onPress();
+      }}
+      activeOpacity={0.72}
+      style={[styles.chatRow, { backgroundColor: colors.surface, borderRadius: 14, marginHorizontal: spacing.lg, marginBottom: 8, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border }]}
+    >
+      <Avatar
+        uri={revealed ? chat.other_user?.profile_picture : undefined}
+        name={revealed ? chat.other_user?.display_name : "?"}
+        size={48}
+        online={false}
+        onlineStatus="offline"
+      />
+
+      <View style={{ flex: 1, marginLeft: 12 }}>
+        <View style={styles.chatTopLine}>
+          <NxText
+            variant="titleSm"
+            numberOfLines={1}
+            style={hasUnread ? { fontFamily: fonts.bodySemi } : { color: colors.mutedFg }}
+          >
+            {revealed ? (chat.other_user?.display_name || "Unknown") : "Someone"}
+          </NxText>
+
+          <NxText
+            variant="caption"
+            style={{
+              marginLeft: 10,
+              color: hasUnread ? colors.primary : colors.mutedFg,
+              fontFamily: hasUnread ? fonts.bodySemi : undefined,
+            }}
+          >
+            {time}
+          </NxText>
+        </View>
+
+        <View style={styles.chatPreviewLine}>
+          <NxText
+            variant="bodySm"
+            numberOfLines={1}
+            style={{
+              flex: 1,
+              color: hasUnread ? colors.foreground : colors.mutedFg,
+              fontFamily: hasUnread ? fonts.bodySemi : undefined,
             }}
           >
             {preview}

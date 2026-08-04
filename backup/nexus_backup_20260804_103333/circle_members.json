@@ -1,0 +1,20 @@
+[
+ {
+  "circle_id": "circle_f2b191a27dec4939",
+  "user_id": "usr_c2b11bc7ac8f4799",
+  "role": "owner",
+  "joined_at": "2026-07-11T14:52:00.782473+00:00"
+ },
+ {
+  "circle_id": "circle_f2b191a27dec4939",
+  "user_id": "usr_7c0b1fa2e71e4be5",
+  "role": "member",
+  "joined_at": "2026-07-11T14:52:35.524459+00:00"
+ },
+ {
+  "circle_id": "circle_3c5fc9fce4ff4620",
+  "user_id": "usr_c2b11bc7ac8f4799",
+  "role": "owner",
+  "joined_at": "2026-08-04T04:40:40.76881+00:00"
+ }
+]

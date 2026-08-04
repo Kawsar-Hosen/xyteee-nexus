@@ -1,20 +1,11 @@
-import { Platform } from "react-native";
 /**
  * XYTEEE Nexus API client.
  *
- * On web (Cloudflare Pages): uses EXPO_PUBLIC_BACKEND_URL directly —
- * no proxy needed, CORS handled on backend.
- *
- * On web (local dev): falls back to relative URL for proxy.js.
- *
- * On native (iOS/Android): uses EXPO_PUBLIC_BACKEND_URL.
+ * All platforms use the deployed backend configured in
+ * EXPO_PUBLIC_BACKEND_URL. Local web development only serves the UI locally.
  */
 
-const isWeb = Platform.OS === "web";
-const isProd = isWeb && typeof window !== "undefined" && !window.location.hostname.includes("localhost");
-const BASE = isWeb
-  ? (isProd ? (process.env.EXPO_PUBLIC_BACKEND_URL ?? "") : "")
-  : (process.env.EXPO_PUBLIC_BACKEND_URL ?? "");
+const BASE = process.env.EXPO_PUBLIC_BACKEND_URL ?? "";
 
 export const API_BASE = `${BASE}/api`;
 

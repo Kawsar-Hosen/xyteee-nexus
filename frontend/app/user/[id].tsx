@@ -23,6 +23,9 @@ import { VerifiedBadge } from "@/src/components/VerifiedBadge";
 import { AnimatedStatusText } from "@/src/components/AnimatedStatusText";
 import { fonts, radii, spacing } from "@/src/theme";
 
+const COVER_H = 200;
+const AVATAR_SIZE = 88;
+
 export default function UserProfile() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { colors } = useTheme();
@@ -35,6 +38,9 @@ export default function UserProfile() {
   const [hasStory, setHasStory] = useState(false);
   const [storyImages, setStoryImages] = useState<string[]>([]);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [optimisticRelation, setOptimisticRelation] = useState<string | null>(null);
+
+  const effectiveRelation = optimisticRelation ?? u?.relation;
 
   const load = useCallback(async () => {
     if (!token || !id) return;
@@ -66,9 +72,16 @@ export default function UserProfile() {
 
   const act = async (path: string) => {
     setBusy(true);
+    if (path === "/friends/request") setOptimisticRelation("requested");
+    else if (path === "/friends/cancel") setOptimisticRelation(null);
+    else if (path === "/friends/accept") setOptimisticRelation("friend");
+    else if (path === "/friends/reject") setOptimisticRelation(null);
     try {
       await api(path, { method: "POST", body: { user_id: id }, token: token! });
+      setOptimisticRelation(null);
       load();
+    } catch {
+      setOptimisticRelation(null);
     } finally { setBusy(false); }
   };
 
@@ -103,20 +116,20 @@ export default function UserProfile() {
   if (notFound) {
     return (
       <SafeAreaView edges={["top"]} style={{ flex: 1, backgroundColor: colors.background }}>
-        <View style={[styles.notFoundHeader, { borderBottomColor: colors.border }]}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn}>
-            <Feather name="chevron-left" size={24} color={colors.foreground} />
+        <View style={[styles.header, { borderBottomColor: colors.border }]}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.headerBtn}>
+            <Feather name="arrow-left" size={20} color={colors.foreground} />
           </TouchableOpacity>
-          <NxText variant="titleSm">Profile</NxText>
+          <NxText style={[styles.headerTitle, { color: colors.foreground }]}>Profile</NxText>
           <View style={{ width: 40 }} />
         </View>
         <View style={styles.notFoundBody}>
-          <View style={[styles.notFoundAvatar, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <Feather name="user" size={42} color={colors.mutedFg} />
+          <View style={[styles.notFoundIcon, { backgroundColor: colors.surfaceHigh }]}>
+            <Feather name="user" size={36} color={colors.mutedFg} />
           </View>
-          <NxText variant="title" style={{ marginTop: 18 }}>User Not Found</NxText>
-          <NxText variant="bodySm" style={{ marginTop: 8, color: colors.mutedFg, textAlign: "center", maxWidth: 280 }}>
-            This profile is unavailable or has been removed.
+          <NxText style={[styles.notFoundTitle, { color: colors.foreground }]}>User Not Found</NxText>
+          <NxText style={[styles.notFoundSub, { color: colors.mutedFg }]}>
+            This profile doesn't exist or has been removed.
           </NxText>
         </View>
       </SafeAreaView>
@@ -127,361 +140,311 @@ export default function UserProfile() {
   if (!u) {
     return (
       <SafeAreaView edges={["top"]} style={{ flex: 1, backgroundColor: colors.background, alignItems: "center", justifyContent: "center" }}>
-        <ActivityIndicator color={colors.primary} />
+        <ActivityIndicator color={colors.primary} size="large" />
       </SafeAreaView>
     );
   }
 
   const joinedDate = u.created_at
-    ? new Date(u.created_at).toLocaleDateString(undefined, { month: "long", year: "numeric" })
+    ? new Date(u.created_at).toLocaleDateString(undefined, { month: "short", year: "numeric" })
     : null;
+
   const relationMeta = (() => {
     switch (u.relation) {
       case "friend":
-        return { label: "Bonded", icon: "heart", color: colors.primary };
+        return { label: "Bonded", icon: "heart" as const, color: colors.primary, bg: `${colors.primary}15` };
       case "requested":
-        return { label: "Request sent", icon: "clock", color: "#F0B232" };
+        return { label: "Request Sent", icon: "clock" as const, color: "#F0B232", bg: "#F0B23215" };
       case "incoming":
-        return { label: "Wants to bond", icon: "user-plus", color: colors.primary };
+        return { label: "Wants to Bond", icon: "user-plus" as const, color: colors.primary, bg: `${colors.primary}15` };
       case "blocked":
-        return { label: "Blocked", icon: "slash", color: colors.danger };
+        return { label: "Blocked", icon: "slash" as const, color: colors.danger, bg: `${colors.danger}15` };
       default:
-        return { label: u.private_locked ? "Private profile" : "Open profile", icon: u.private_locked ? "lock" : "globe", color: u.private_locked ? colors.mutedFg : colors.primary };
+        return { label: u.private_locked ? "Private" : "Open", icon: u.private_locked ? ("lock" as const) : ("globe" as const), color: u.private_locked ? colors.mutedFg : colors.primary, bg: u.private_locked ? `${colors.mutedFg}15` : `${colors.primary}15` };
     }
   })();
 
   /* ── Main profile ── */
   return (
     <SafeAreaView edges={["top"]} style={{ flex: 1, backgroundColor: colors.background }}>
-      <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
 
-        {/* Cover */}
-        <View style={styles.cover}>
+        {/* ═══════════════ COVER ═══════════════ */}
+        <View style={[styles.cover, { height: COVER_H }]}>
           {u.cover_picture ? (
             <Image source={{ uri: u.cover_picture }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
           ) : (
-            <LinearGradient colors={[colors.primary, colors.primaryDeep]} style={StyleSheet.absoluteFillObject} />
+            <LinearGradient
+              colors={[colors.primaryDeep, colors.primary, `${colors.primary}44`]}
+              start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+              style={StyleSheet.absoluteFillObject}
+            />
           )}
           <LinearGradient
-            colors={["transparent", "rgba(0,0,0,0.4)"]}
+            colors={["rgba(0,0,0,0.1)", "transparent", "rgba(0,0,0,0.4)"]}
             style={StyleSheet.absoluteFillObject}
           />
-          <View style={[styles.coverOrbLg, { backgroundColor: `${colors.primary}30` }]} />
-          <View style={[styles.coverOrbSm, { backgroundColor: `${colors.primaryDeep}40` }]} />
-          {/* Back */}
-          <TouchableOpacity
-            onPress={() => router.back()}
-            style={[styles.iconBtn, { backgroundColor: colors.glass, position: "absolute", top: spacing.md, left: spacing.md }]}
-          >
-            <Feather name="chevron-left" size={22} color="#fff" />
-          </TouchableOpacity>
+          <LinearGradient
+            colors={["transparent", colors.background]}
+            start={{ x: 0, y: 0.7 }} end={{ x: 0, y: 1 }}
+            style={StyleSheet.absoluteFillObject}
+          />
 
-          {/* Share + More */}
-          <View style={{ position: "absolute", top: spacing.md, right: spacing.md, flexDirection: "row", gap: 8 }}>
-            <TouchableOpacity onPress={handleShare} style={[styles.iconBtn, { backgroundColor: colors.glass }]}>
-              <Feather name="share-2" size={18} color="#fff" />
+          {/* Top bar */}
+          <View style={styles.coverTopBar}>
+            <TouchableOpacity onPress={() => router.back()} style={styles.coverBtn}>
+              <Feather name="arrow-left" size={20} color="#fff" />
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => setMoreOpen(v => !v)} style={[styles.iconBtn, { backgroundColor: colors.glass }]}>
-              <Feather name="more-horizontal" size={18} color="#fff" />
-            </TouchableOpacity>
+            <View style={styles.coverTopRight}>
+              <TouchableOpacity onPress={handleShare} style={styles.coverBtn}>
+                <Feather name="share-2" size={17} color="#fff" />
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setMoreOpen(v => !v)} style={styles.coverBtn}>
+                <Feather name="more-horizontal" size={17} color="#fff" />
+              </TouchableOpacity>
+            </View>
           </View>
 
           {/* More dropdown */}
           {moreOpen && (
             <Animated.View
-              entering={FadeIn.duration(150)}
-              style={[styles.moreMenu, { backgroundColor: colors.surface, borderColor: colors.border, top: spacing.md + 46, right: spacing.md }]}
+              entering={FadeIn.duration(120)}
+              style={[styles.dropdown, { backgroundColor: colors.surface, borderColor: colors.border }]}
             >
-              <TouchableOpacity
-                style={styles.moreItem}
-                onPress={() => { setMoreOpen(false); handleReport(); }}
-              >
-                <Feather name="flag" size={15} color={colors.danger} />
-                <NxText style={{ marginLeft: 10, color: colors.danger, fontFamily: fonts.bodyMedium, fontSize: 14 }}>
-                  Report
-                </NxText>
+              <TouchableOpacity style={styles.dropdownItem} onPress={() => { setMoreOpen(false); handleReport(); }}>
+                <Feather name="flag" size={14} color={colors.danger} />
+                <NxText style={[styles.dropdownText, { color: colors.danger }]}>Report</NxText>
               </TouchableOpacity>
               {u.relation !== "blocked" && (
                 <TouchableOpacity
-                  style={[styles.moreItem, { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }]}
+                  style={[styles.dropdownItem, { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }]}
                   onPress={() => { setMoreOpen(false); act("/friends/block"); }}
                 >
-                  <Feather name="slash" size={15} color={colors.danger} />
-                  <NxText style={{ marginLeft: 10, color: colors.danger, fontFamily: fonts.bodyMedium, fontSize: 14 }}>
-                    Block
-                  </NxText>
+                  <Feather name="slash" size={14} color={colors.danger} />
+                  <NxText style={[styles.dropdownText, { color: colors.danger }]}>Block</NxText>
                 </TouchableOpacity>
               )}
             </Animated.View>
           )}
-          <View style={[styles.coverMetaCard, { backgroundColor: colors.glass, borderColor: "rgba(255,255,255,0.16)" }]}> 
-            <View style={{ flex: 1 }}>
-              <NxText style={styles.coverMetaKicker}>PROFILE</NxText>
-              <NxText style={styles.coverMetaName} numberOfLines={1}>@{u.username}</NxText>
-            </View>
-            <View style={[styles.coverMetaStatus, { backgroundColor: u.private_locked ? "rgba(255,255,255,0.12)" : "rgba(35,165,90,0.18)" }]}> 
-              {!u.private_locked && u.online ? (
-                <View style={styles.coverMetaDot} />
-              ) : (
-                <Feather name={u.private_locked ? "lock" : "user"} size={11} color="#fff" />
-              )}
-              <NxText style={styles.coverMetaStatusText}>
-                {u.private_locked ? "Private" : u.online ? "Online" : "Profile"}
-              </NxText>
-            </View>
-          </View>
         </View>
 
+        {/* ═══════════════ IDENTITY CARD ═══════════════ */}
         <View style={{ paddingHorizontal: spacing.lg }}>
+          <Animated.View entering={FadeInDown.duration(400)} style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
 
-          <Animated.View entering={FadeInDown.duration(400)} style={[styles.heroCard, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
-            {/* Avatar — plain, no RGB gradient ring */}
-            <View style={styles.profileTopRow}>
+            {/* Avatar */}
+            <View style={styles.avatarContainer}>
               <TouchableOpacity
                 activeOpacity={hasStory ? 0.85 : 1}
                 disabled={!hasStory}
                 onPress={() => router.push(`/story/${id}`)}
-                style={styles.avatarWrap}
               >
-                <View style={{ padding: 3, borderRadius: 54, backgroundColor: colors.background }}>
-                  <Avatar uri={u.profile_picture} name={u.display_name} size={100} frame={u.profile_frame} achievement={u.achievement_level} animation={u.profile_animation} animationSpeed={u.profile_animation_speed} animationIntensity={u.profile_animation_intensity} />
+                <View style={[styles.avatarRing, { borderColor: colors.background }]}>
+                  <Avatar
+                    uri={u.profile_picture}
+                    name={u.display_name}
+                    size={AVATAR_SIZE}
+                    frame={u.profile_frame}
+                    achievement={u.achievement_level}
+                    animation={u.profile_animation}
+                    animationSpeed={u.profile_animation_speed}
+                    animationIntensity={u.profile_animation_intensity}
+                  />
                 </View>
               </TouchableOpacity>
             </View>
 
-            <View style={[styles.relationBadge, { backgroundColor: `${relationMeta.color}18`, borderColor: `${relationMeta.color}2E` }]}> 
-              <Feather name={relationMeta.icon as any} size={12} color={relationMeta.color} />
-              <NxText style={{ marginLeft: 6, color: relationMeta.color, fontFamily: fonts.bodySemi, fontSize: 12 }}>
-                {relationMeta.label}
-              </NxText>
+            {/* Name + badge */}
+            <View style={styles.nameRow}>
+              <NxText style={[styles.displayName, { color: colors.foreground }]}>{u.display_name}</NxText>
+              <VerifiedBadge badgeType={u.badge_type} badgeIcon={u.badge_icon} badgeExpiresAt={u.badge_expires_at} verifiedSince={u.verified_since} showInfo size={16} />
             </View>
+            <NxText style={[styles.username, { color: colors.mutedFg }]}>@{u.username}</NxText>
 
-            {/* Name + username + bio */}
-            <View style={styles.identityBlock}>
-              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 }}>
-                <NxText variant="title" style={{ flexShrink: 1, textAlign: "center" }}>{u.display_name}</NxText>
-                <VerifiedBadge badgeType={u.badge_type} badgeIcon={u.badge_icon} badgeExpiresAt={u.badge_expires_at} verifiedSince={u.verified_since} showInfo size={18} />
+            {/* Bio */}
+            {!u.private_locked && u.bio ? (
+              <NxText style={[styles.bio, { color: colors.foreground }]}>{u.bio}</NxText>
+            ) : null}
+
+            {/* Status */}
+            {!u.private_locked && u.status_text ? (
+              <View style={[styles.statusPill, { backgroundColor: colors.surfaceHigh, borderColor: colors.border }]}>
+                <View style={[styles.statusDot, { backgroundColor: colors.primary }]}>
+                  <Feather name="edit-3" size={9} color={colors.onPrimary} />
+                </View>
+                <AnimatedStatusText color={colors.foreground} style={{ flexShrink: 1, fontSize: 12, lineHeight: 16 }}>
+                  {u.status_text}
+                </AnimatedStatusText>
               </View>
-              <NxText variant="bodySm" style={{ color: colors.mutedFg, textAlign: "center" }}>@{u.username}</NxText>
+            ) : null}
 
-              {!u.private_locked && u.bio ? (
-                <NxText style={{ fontSize: 14, lineHeight: 21, textAlign: "center", color: colors.foreground, marginTop: 8, paddingHorizontal: 8 }}>
-                  {u.bio}
-                </NxText>
-              ) : null}
-
-              {!u.private_locked && u.status_text ? (
-                <View style={[styles.notePill, { backgroundColor: colors.backgroundElevated, borderColor: colors.border }]}> 
-                  <View style={[styles.notePillIcon, { backgroundColor: colors.primary }]}> 
-                    <Feather name="edit-3" size={11} color={colors.onPrimary} />
+            {/* Joined + Birthday inline */}
+            {(!u.private_locked && (joinedDate || u.birthday)) ? (
+              <View style={styles.infoRow}>
+                {joinedDate && (
+                  <View style={styles.infoItem}>
+                    <Feather name="calendar" size={11} color={colors.mutedFg} />
+                    <NxText style={[styles.infoText, { color: colors.mutedFg }]}>Joined {joinedDate}</NxText>
                   </View>
-                  <AnimatedStatusText color={colors.foreground} style={{ flexShrink: 1, fontSize: 13, lineHeight: 18 }}>
-                    {u.status_text}
-                  </AnimatedStatusText>
-                </View>
-              ) : null}
-            </View>
-
-            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 12, justifyContent: "center" }}>
-              <View style={[styles.chip, { backgroundColor: colors.backgroundElevated, borderColor: colors.border }]}> 
-                <Feather name="at-sign" size={11} color={colors.mutedFg} />
-                <NxText style={{ fontSize: 12, color: colors.mutedFg, marginLeft: 4 }}>Public profile</NxText>
+                )}
+                {u.birthday && (
+                  <View style={styles.infoItem}>
+                    <BirthdayGift color={colors.primary} />
+                    <NxText style={[styles.infoText, { color: colors.mutedFg }]}>
+                      {new Date(`${u.birthday}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                    </NxText>
+                  </View>
+                )}
               </View>
-              {joinedDate && (
-                <View style={[styles.chip, { backgroundColor: colors.backgroundElevated, borderColor: colors.border }]}> 
-                  <Feather name="calendar" size={11} color={colors.mutedFg} />
-                  <NxText style={{ fontSize: 12, color: colors.mutedFg, marginLeft: 4 }}>Joined {joinedDate}</NxText>
-                </View>
-              )}
-              {u.online && (
-                <View style={[styles.chip, { backgroundColor: colors.backgroundElevated, borderColor: colors.border }]}> 
-                  <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: "#23A55A", marginRight: 4 }} />
-                  <NxText style={{ fontSize: 12, color: "#23A55A" }}>Active now</NxText>
-                </View>
-              )}
-            </View>
+            ) : null}
 
+            {/* Online */}
+            {u.online ? (
+              <View style={styles.onlineRow}>
+                <View style={styles.onlineDot} />
+                <NxText style={[styles.onlineText, { color: "#23A55A" }]}>Online now</NxText>
+              </View>
+            ) : null}
+
+            {/* Website */}
             {!u.private_locked && u.website ? (
               <TouchableOpacity
                 onPress={() => Linking.openURL(u.website.startsWith("http") ? u.website : `https://${u.website}`)}
-                style={[styles.linkRow, { backgroundColor: colors.backgroundElevated, borderColor: colors.border }]}
+                style={[styles.linkPill, { backgroundColor: colors.surfaceHigh, borderColor: colors.border }]}
               >
-                <Feather name="link" size={13} color={colors.primary} />
-                <NxText style={{ marginLeft: 6, color: colors.primary, fontFamily: fonts.bodySemi, fontSize: 13 }}>
+                <Feather name="link" size={11} color={colors.primary} />
+                <NxText style={[styles.linkText, { color: colors.primary }]}>
                   {u.website.replace(/^https?:\/\//, "")}
                 </NxText>
               </TouchableOpacity>
             ) : null}
 
-            {!u.private_locked && u.birthday ? (
-              <Animated.View entering={FadeInDown.duration(650).springify()} style={styles.metaLine}>
-                <BirthdayGift color={colors.primary} />
-                <NxText variant="bodySm" style={{ marginLeft: 8, color: colors.mutedFg, fontFamily: fonts.bodyMedium }}>
-                  {new Date(`${u.birthday}T00:00:00`).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })}
-                </NxText>
-              </Animated.View>
-            ) : null}
-
+            {/* Mutual bonds */}
             {!u.private_locked && (u.mutual_bonds_count ?? 0) > 0 ? (
               <View style={styles.mutualRow}>
                 <View style={styles.mutualAvatars}>
                   {(u.mutual_bonds_preview || []).slice(0, 3).map((person: any, index: number) => (
                     <View
                       key={person.user_id}
-                      style={[styles.mutualAvatarWrap, { marginLeft: index === 0 ? 0 : -7, zIndex: 3 - index, borderColor: colors.surface }]}
+                      style={[styles.mutualAvatar, { marginLeft: index === 0 ? 0 : -6, zIndex: 3 - index, borderColor: colors.surface }]}
                     >
-                      <Avatar uri={person.profile_picture} name={person.display_name} size={22} />
+                      <Avatar uri={person.profile_picture} name={person.display_name} size={20} />
                     </View>
                   ))}
                 </View>
-                <NxText variant="bodySm" style={{ marginLeft: 7, color: colors.mutedFg, fontFamily: fonts.bodySemi }}>
-                  {u.mutual_bonds_count} Mutual {u.mutual_bonds_count === 1 ? "Bond" : "Bonds"}
+                <NxText style={[styles.mutualText, { color: colors.mutedFg }]}>
+                  {u.mutual_bonds_count} mutual {u.mutual_bonds_count === 1 ? "bond" : "bonds"}
                 </NxText>
               </View>
             ) : null}
           </Animated.View>
 
-          {/* Stats or Private */}
+          {/* ═══════════════ STATS ═══════════════ */}
           {!u.private_locked ? (
-            <Animated.View entering={FadeIn.delay(100).duration(400)} style={[styles.statsRow, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
-              <StatItem icon="users" label="Bonds" value={u.friend_count ?? 0} color={colors.primary} />
-              <View style={{ width: 1, height: 36, backgroundColor: colors.border }} />
-              <StatItem icon="image" label="Reveries" value={u.story_count ?? 0} color="#7a00ff" />
+            <Animated.View entering={FadeIn.delay(80).duration(400)} style={[styles.statsCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <StatItem value={u.friend_count ?? 0} label="Bonds" color={colors.primary} />
+              <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
+              <StatItem value={u.story_count ?? 0} label="Reveries" color="#7a00ff" />
             </Animated.View>
           ) : (
-            <Animated.View entering={FadeInDown.duration(500).springify()}>
-              <View style={[styles.privateCard, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
+            <Animated.View entering={FadeInDown.delay(80).duration(400)}>
+              <View style={[styles.privateCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
                 <LinearGradient
-                  colors={[colors.surface, colors.surfaceHigh, `${colors.primary}10`]}
+                  colors={[colors.surface, `${colors.primary}08`]}
                   style={StyleSheet.absoluteFillObject}
                 />
-                <View style={[styles.privateBadge, { backgroundColor: `${colors.primary}18`, borderColor: `${colors.primary}2C` }]}> 
-                  <Feather name="shield" size={12} color={colors.primary} />
-                  <NxText style={{ marginLeft: 6, color: colors.primary, fontFamily: fonts.bodySemi, fontSize: 12 }}>
-                    Protected Space
-                  </NxText>
+                <View style={[styles.privateIcon, { backgroundColor: `${colors.primary}15` }]}>
+                  <Feather name="lock" size={22} color={colors.primary} />
                 </View>
-                <View style={styles.privateIcon}>
-                  <LinearGradient
-                    colors={[colors.primary, colors.primaryDeep]}
-                    style={styles.privateIconGrad}
-                  >
-                    <Feather name="lock" size={26} color={colors.onPrimary} />
-                  </LinearGradient>
-                </View>
-                <NxText variant="title" style={{ marginTop: 16 }}>This account is private</NxText>
-                <NxText variant="bodySm" style={{ marginTop: 8, color: colors.mutedFg, textAlign: "center", maxWidth: 290, lineHeight: 20 }}>
-                  @{u.username} keeps their profile locked. Only approved Bonds can see their reveries, info and activity.
+                <NxText style={[styles.privateTitle, { color: colors.foreground }]}>Private Account</NxText>
+                <NxText style={[styles.privateDesc, { color: colors.mutedFg }]}>
+                  Only approved bonds can see this profile's content.
                 </NxText>
-                <View style={[styles.privateHint, { backgroundColor: colors.surfaceHigh }]}> 
+                <View style={[styles.privateHint, { backgroundColor: colors.surfaceHigh }]}>
                   <Feather name="user-plus" size={13} color={colors.primary} />
-                  <NxText style={{ marginLeft: 7, color: colors.foreground, fontFamily: fonts.bodyMedium, fontSize: 13 }}>
+                  <NxText style={[styles.privateHintText, { color: colors.foreground }]}>
                     Send a bond request to follow
                   </NxText>
                 </View>
               </View>
             </Animated.View>
           )}
-          {/* Story gallery strip */}
+
+          {/* ═══════════════ STORY GALLERY ═══════════════ */}
           {storyImages.length > 0 && (
-            <Animated.View entering={FadeIn.delay(200).duration(400)}>
-              <View style={{ flexDirection: "row", alignItems: "center", marginTop: spacing.lg, marginBottom: 10 }}>
-                <Feather name="image" size={13} color={colors.mutedFg} />
-                <NxText style={{ marginLeft: 6, fontSize: 11, fontFamily: fonts.bodySemi, color: colors.mutedFg, letterSpacing: 0.6, textTransform: "uppercase" }}>
-                  Recent Reveries
-                </NxText>
+            <Animated.View entering={FadeIn.delay(120).duration(400)}>
+              <View style={styles.sectionHeader}>
+                <Feather name="image" size={12} color={colors.mutedFg} />
+                <NxText style={[styles.sectionTitle, { color: colors.mutedFg }]}>RECENT REVERIES</NxText>
                 <TouchableOpacity onPress={() => router.push(`/story/${id}`)} style={{ marginLeft: "auto" }}>
-                  <NxText style={{ fontSize: 12, color: colors.primary, fontFamily: fonts.bodySemi }}>View all</NxText>
+                  <NxText style={[styles.viewAll, { color: colors.primary }]}>View all</NxText>
                 </TouchableOpacity>
               </View>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -spacing.lg, paddingHorizontal: spacing.lg }}>
-                {storyImages.map((uri, i) => (
-                  <TouchableOpacity
-                    key={i}
-                    onPress={() => router.push(`/story/${id}`)}
-                    style={[styles.galleryThumb, { borderColor: colors.border, marginRight: 8 }]}
-                    activeOpacity={0.85}
-                  >
-                    <Image source={{ uri }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
-                  </TouchableOpacity>
-                ))}
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                <View style={styles.galleryRow}>
+                  {storyImages.map((uri, i) => (
+                    <TouchableOpacity
+                      key={i}
+                      onPress={() => router.push(`/story/${id}`)}
+                      style={[styles.galleryThumb, { borderColor: colors.border }]}
+                      activeOpacity={0.85}
+                    >
+                      <Image source={{ uri }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
+                    </TouchableOpacity>
+                  ))}
+                </View>
               </ScrollView>
             </Animated.View>
           )}
 
-          {/* Action buttons */}
-          <View style={{ height: spacing.lg }} />
-
-          {u.relation === "friend" ? (
-            <View style={[styles.actionPanel, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
-              <PrimaryActionButton
-                colors={colors}
-                icon="message-circle"
-                label="Message"
-                onPress={openChat}
-              />
-              <View style={{ flexDirection: "row", gap: 10 }}>
-                <TouchableOpacity
-                  disabled={busy}
-                  onPress={() => act("/friends/unfriend")}
-                  style={[styles.secondaryBtn, { flex: 1, borderColor: colors.border }]}
-                >
-                  <Feather name="user-minus" size={15} color={colors.foreground} style={{ marginRight: 6 }} />
-                  <NxText style={{ fontFamily: fonts.bodyMedium, color: colors.foreground, fontSize: 14 }}>Unfriend</NxText>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  disabled={busy}
-                  onPress={handleShare}
-                  style={[styles.secondaryBtn, { flex: 1, borderColor: colors.border }]}
-                >
-                  <Feather name="share-2" size={15} color={colors.foreground} style={{ marginRight: 6 }} />
-                  <NxText style={{ fontFamily: fonts.bodyMedium, color: colors.foreground, fontSize: 14 }}>Share</NxText>
+          {/* ═══════════════ ACTIONS ═══════════════ */}
+          <Animated.View entering={FadeInDown.delay(150).duration(400)}>
+            {effectiveRelation === "friend" ? (
+              <View style={[styles.actionsCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                <PrimaryButton colors={colors} icon="message-circle" label="Message" onPress={openChat} />
+                <View style={styles.secondaryRow}>
+                  <TouchableOpacity disabled={busy} onPress={() => act("/friends/unfriend")} style={[styles.secondaryBtn, { borderColor: colors.border }]}>
+                    <Feather name="user-minus" size={14} color={colors.foreground} />
+                    <NxText style={[styles.secondaryText, { color: colors.foreground }]}>Unfriend</NxText>
+                  </TouchableOpacity>
+                  <TouchableOpacity disabled={busy} onPress={handleShare} style={[styles.secondaryBtn, { borderColor: colors.border }]}>
+                    <Feather name="share-2" size={14} color={colors.foreground} />
+                    <NxText style={[styles.secondaryText, { color: colors.foreground }]}>Share</NxText>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : effectiveRelation === "requested" ? (
+              <View style={[styles.actionsCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                <TouchableOpacity disabled={busy} onPress={() => act("/friends/cancel")} style={[styles.secondaryBtn, { borderColor: "#F0B232" + "33" }]}>
+                  <Feather name="clock" size={14} color="#F0B232" />
+                  <NxText style={[styles.secondaryText, { color: "#F0B232" }]}>Cancel Request</NxText>
                 </TouchableOpacity>
               </View>
-            </View>
-          ) : u.relation === "requested" ? (
-            <View style={[styles.actionPanel, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
-              <TouchableOpacity disabled={busy} onPress={() => act("/friends/cancel")} style={[styles.primaryBtn, { backgroundColor: colors.surfaceHigh }]}> 
-                <Feather name="clock" size={16} color={colors.foreground} style={{ marginRight: 8 }} />
-                <NxText style={{ color: colors.foreground, fontFamily: fonts.bodySemi }}>Request sent · Cancel</NxText>
-              </TouchableOpacity>
-            </View>
-          ) : u.relation === "incoming" ? (
-            <View style={[styles.actionPanel, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
-              <PrimaryActionButton
-                colors={colors}
-                icon="user-check"
-                label="Accept Bond Request"
-                onPress={() => act("/friends/accept")}
-                disabled={busy}
-              />
-              <TouchableOpacity disabled={busy} onPress={() => act("/friends/reject")} style={[styles.secondaryBtn, { borderColor: colors.border }]}> 
-                <Feather name="x" size={16} color={colors.foreground} style={{ marginRight: 6 }} />
-                <NxText style={{ fontFamily: fonts.bodyMedium, color: colors.foreground }}>Decline</NxText>
-              </TouchableOpacity>
-            </View>
-          ) : u.relation === "blocked" ? (
-            <View style={[styles.actionPanel, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
-              <TouchableOpacity disabled={busy} onPress={() => act("/friends/unblock")} style={[styles.primaryBtn, { backgroundColor: colors.surfaceHigh }]}> 
-                <Feather name="slash" size={16} color={colors.foreground} style={{ marginRight: 8 }} />
-                <NxText style={{ color: colors.foreground, fontFamily: fonts.bodySemi }}>Unblock</NxText>
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <View style={[styles.actionPanel, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
-              <PrimaryActionButton
-                colors={colors}
-                icon="user-plus"
-                label="Send Bond Request"
-                onPress={() => act("/friends/request")}
-                disabled={busy}
-              />
-              <TouchableOpacity onPress={handleShare} style={[styles.secondaryBtn, { borderColor: colors.border }]}> 
-                <Feather name="share-2" size={15} color={colors.foreground} style={{ marginRight: 6 }} />
-                <NxText style={{ fontFamily: fonts.bodyMedium, color: colors.foreground }}>Share Profile</NxText>
-              </TouchableOpacity>
-            </View>
-          )}
+            ) : effectiveRelation === "incoming" ? (
+              <View style={[styles.actionsCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                <PrimaryButton colors={colors} icon="user-check" label="Accept Bond" onPress={() => act("/friends/accept")} disabled={busy} />
+                <TouchableOpacity disabled={busy} onPress={() => act("/friends/reject")} style={[styles.secondaryBtn, { borderColor: colors.border }]}>
+                  <Feather name="x" size={14} color={colors.foreground} />
+                  <NxText style={[styles.secondaryText, { color: colors.foreground }]}>Decline</NxText>
+                </TouchableOpacity>
+              </View>
+            ) : effectiveRelation === "blocked" ? (
+              <View style={[styles.actionsCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                <TouchableOpacity disabled={busy} onPress={() => act("/friends/unblock")} style={[styles.secondaryBtn, { borderColor: colors.border }]}>
+                  <Feather name="slash" size={14} color={colors.foreground} />
+                  <NxText style={[styles.secondaryText, { color: colors.foreground }]}>Unblock</NxText>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View style={[styles.actionsCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                <PrimaryButton colors={colors} icon="user-plus" label="Send Bond Request" onPress={() => act("/friends/request")} disabled={busy} />
+                {!u.private_locked && (
+                  <PrimaryButton colors={colors} icon="message-circle" label="Message" onPress={openChat} />
+                )}
+              </View>
+            )}
+          </Animated.View>
+
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -490,22 +453,17 @@ export default function UserProfile() {
 
 /* ── Sub-components ── */
 
-function StatItem({ icon, label, value, color }: { icon: string; label: string; value: any; color: string }) {
+function StatItem({ value, label, color }: { value: any; label: string; color: string }) {
   return (
     <View style={{ flex: 1, alignItems: "center" }}>
-      <Feather name={icon as any} size={16} color={color} style={{ marginBottom: 4 }} />
-      <NxText variant="titleSm">{String(value)}</NxText>
-      <NxText variant="caption" style={{ marginTop: 1 }}>{label}</NxText>
+      <NxText style={[styles.statValue, { color }]}>{String(value)}</NxText>
+      <NxText style={styles.statLabel}>{label}</NxText>
     </View>
   );
 }
 
-function PrimaryActionButton({
-  colors,
-  icon,
-  label,
-  onPress,
-  disabled,
+function PrimaryButton({
+  colors, icon, label, onPress, disabled,
 }: {
   colors: any;
   icon: keyof typeof Feather.glyphMap;
@@ -514,28 +472,20 @@ function PrimaryActionButton({
   disabled?: boolean;
 }) {
   const pressed = useSharedValue(0);
-  const animatedStyle = useAnimatedStyle(() => ({
+  const animStyle = useAnimatedStyle(() => ({
     transform: [{ scale: withTiming(pressed.value ? 0.97 : 1, { duration: 120 }) }],
   }));
 
   return (
-    <Pressable
-      disabled={disabled}
-      onPress={onPress}
-      onPressIn={() => { pressed.value = 1; }}
-      onPressOut={() => { pressed.value = 0; }}
-      style={styles.primaryBtnWrap}
-    >
-      <Animated.View style={[styles.primaryBtn, animatedStyle]}>
+    <Pressable disabled={disabled} onPress={onPress} onPressIn={() => { pressed.value = 1; }} onPressOut={() => { pressed.value = 0; }}>
+      <Animated.View style={[styles.primaryBtn, animStyle]}>
         <LinearGradient
           colors={disabled ? [colors.surfaceHigh, colors.surfaceHigh] : [colors.primary, colors.primaryDeep]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
+          start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
           style={StyleSheet.absoluteFillObject}
         />
-        <View style={[styles.primaryBtnInnerGlow, { backgroundColor: disabled ? "transparent" : "rgba(255,255,255,0.12)" }]} />
-        <Feather name={icon} size={16} color={disabled ? colors.mutedFg : colors.onPrimary} style={{ marginRight: 8 }} />
-        <NxText style={{ color: disabled ? colors.mutedFg : colors.onPrimary, fontFamily: fonts.bodySemi, fontSize: 15 }}>
+        <Feather name={icon} size={15} color={disabled ? colors.mutedFg : colors.onPrimary} />
+        <NxText style={[styles.primaryText, { color: disabled ? colors.mutedFg : colors.onPrimary }]}>
           {label}
         </NxText>
       </Animated.View>
@@ -546,180 +496,304 @@ function PrimaryActionButton({
 function BirthdayGift({ color }: { color: string }) {
   const scale = useSharedValue(1);
   useEffect(() => {
-    scale.value = withRepeat(withSequence(withTiming(1.18, { duration: 700 }), withTiming(1, { duration: 700 })), -1, true);
+    scale.value = withRepeat(withSequence(withTiming(1.15, { duration: 700 }), withTiming(1, { duration: 700 })), -1, true);
   }, []);
   return (
     <Animated.View style={useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }))}>
-      <Feather name="gift" size={16} color={color} />
+      <Feather name="gift" size={13} color={color} />
     </Animated.View>
   );
 }
 
 /* ── Styles ── */
 const styles = StyleSheet.create({
-  notFoundHeader: { height: 60, flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: spacing.md, borderBottomWidth: StyleSheet.hairlineWidth },
+  // Header
+  header: {
+    height: 52,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: spacing.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  headerBtn: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
+  headerTitle: { fontFamily: fonts.bodySemi, fontSize: 16 },
+
+  // Not found
   notFoundBody: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: spacing.xl, paddingBottom: 80 },
-  notFoundAvatar: { width: 100, height: 100, borderRadius: 50, borderWidth: 1, alignItems: "center", justifyContent: "center" },
-  cover: { height: 200, position: "relative" },
-  coverOrbLg: {
+  notFoundIcon: { width: 80, height: 80, borderRadius: 40, alignItems: "center", justifyContent: "center" },
+  notFoundTitle: { fontFamily: fonts.display, fontSize: 20, marginTop: 16 },
+  notFoundSub: { fontFamily: fonts.body, fontSize: 13, marginTop: 8, textAlign: "center", maxWidth: 260, lineHeight: 20 },
+
+  // Cover
+  cover: { position: "relative", overflow: "hidden" },
+  coverTopBar: {
     position: "absolute",
-    width: 170,
-    height: 170,
-    borderRadius: 999,
-    top: -36,
-    right: -30,
-    opacity: 0.6,
+    top: spacing.md,
+    left: spacing.md,
+    right: spacing.md,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    zIndex: 10,
   },
-  coverOrbSm: {
-    position: "absolute",
-    width: 92,
-    height: 92,
-    borderRadius: 999,
-    bottom: 40,
-    left: -18,
-    opacity: 0.45,
+  coverTopRight: { flexDirection: "row", gap: 8 },
+  coverBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.3)",
   },
-  coverMetaCard: {
+
+  // Dropdown
+  dropdown: {
     position: "absolute",
-    left: spacing.lg,
-    right: spacing.lg,
-    bottom: 14,
+    top: 56,
+    right: spacing.md,
+    borderRadius: radii.md,
     borderWidth: 1,
-    borderRadius: radii.lg,
+    minWidth: 140,
+    zIndex: 100,
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 8,
+  },
+  dropdownItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
     paddingHorizontal: 14,
     paddingVertical: 12,
-    flexDirection: "row",
-    alignItems: "center",
   },
-  coverMetaKicker: {
-    color: "rgba(255,255,255,0.72)",
-    fontFamily: fonts.bodySemi,
-    fontSize: 10,
-    letterSpacing: 1,
-    marginBottom: 3,
-  },
-  coverMetaName: {
-    color: "#fff",
-    fontFamily: fonts.display,
-    fontSize: 18,
-  },
-  coverMetaStatus: {
-    flexDirection: "row",
-    alignItems: "center",
-    borderRadius: radii.pill,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    gap: 6,
-  },
-  coverMetaDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 999,
-    backgroundColor: "#23A55A",
-  },
-  coverMetaStatusText: {
-    color: "#fff",
-    fontFamily: fonts.bodySemi,
-    fontSize: 12,
-  },
-  iconBtn: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
-  moreMenu: { position: "absolute", borderRadius: radii.md, borderWidth: 1, minWidth: 160, zIndex: 100, overflow: "hidden" },
-  moreItem: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 14 },
-  heroCard: {
-    marginTop: -48,
-    borderWidth: 1,
+  dropdownText: { fontFamily: fonts.bodyMedium, fontSize: 13 },
+
+  // Card
+  card: {
+    marginTop: -40,
     borderRadius: radii.xl,
+    borderWidth: 1,
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.lg,
     alignItems: "center",
     shadowColor: "#000",
-    shadowOpacity: 0.12,
-    shadowRadius: 22,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 8,
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 4,
   },
-  profileTopRow: { alignItems: "center", marginTop: -54 },
-  avatarWrap: { width: 116, height: 116, borderRadius: 58, alignItems: "center", justifyContent: "center" },
-  relationBadge: {
+
+  // Avatar
+  avatarContainer: { alignItems: "center", marginTop: -AVATAR_SIZE / 2 + 8 },
+  avatarRing: {
+    padding: 3,
+    borderRadius: (AVATAR_SIZE + 6) / 2,
+    backgroundColor: "transparent",
+  },
+
+  // Identity
+  nameRow: {
     flexDirection: "row",
     alignItems: "center",
-    borderWidth: 1,
-    borderRadius: radii.pill,
-    paddingHorizontal: 10,
+    gap: 5,
+    marginTop: 8,
+  },
+  displayName: {
+    fontFamily: fonts.display,
+    fontSize: 22,
+    letterSpacing: 0.3,
+  },
+  username: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    marginTop: 2,
+  },
+  // Bio
+  bio: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    lineHeight: 20,
+    textAlign: "center",
+    marginTop: 10,
+    paddingHorizontal: 4,
+  },
+
+  // Status
+  statusPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 8,
+    paddingHorizontal: 11,
     paddingVertical: 6,
-    marginTop: 10,
-  },
-  identityBlock: { alignItems: "center", marginTop: 12, paddingHorizontal: 16 },
-  notePill: {
-    flexDirection: "row",
-    alignItems: "center",
-    alignSelf: "center",
-    gap: 8,
-    marginTop: 10,
-    maxWidth: "88%",
+    borderRadius: radii.pill,
     borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 13,
-    paddingVertical: 8,
   },
-  notePillIcon: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
+  statusDot: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
     alignItems: "center",
     justifyContent: "center",
   },
-  linkRow: {
-    marginTop: 10,
+
+  // Info row (joined + birthday inline)
+  infoRow: {
     flexDirection: "row",
     alignItems: "center",
-    borderWidth: 1,
+    gap: 12,
+    marginTop: 8,
+  },
+  infoItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  infoText: { fontFamily: fonts.bodyMedium, fontSize: 12 },
+
+  // Online
+  onlineRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    marginTop: 6,
+  },
+  onlineDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "#23A55A" },
+  onlineText: { fontFamily: fonts.bodyMedium, fontSize: 12 },
+
+  // Link
+  linkPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    marginTop: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
     borderRadius: radii.pill,
+    borderWidth: 1,
+  },
+  linkText: { fontFamily: fonts.bodySemi, fontSize: 11 },
+
+  // Mutual
+  mutualRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 8,
+    alignSelf: "flex-start",
+  },
+  mutualAvatars: { flexDirection: "row", alignItems: "center" },
+  mutualAvatar: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 1.5,
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+  },
+  mutualText: { fontFamily: fonts.bodySemi, fontSize: 11 },
+
+  // Stats
+  statsCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: spacing.md,
+    borderRadius: radii.xl,
+    borderWidth: 1,
+    paddingVertical: spacing.lg,
+  },
+  statValue: { fontFamily: fonts.display, fontSize: 22, letterSpacing: 0.5 },
+  statLabel: { fontFamily: fonts.body, fontSize: 11, color: "#888", marginTop: 3, letterSpacing: 0.6, textTransform: "uppercase" },
+  statDivider: { width: 1, height: 34 },
+
+  // Private
+  privateCard: {
+    marginTop: spacing.md,
+    borderRadius: radii.xl,
+    borderWidth: 1,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: 28,
+    alignItems: "center",
+    overflow: "hidden",
+  },
+  privateIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  privateTitle: { fontFamily: fonts.display, fontSize: 17, marginTop: 14 },
+  privateDesc: { fontFamily: fonts.body, fontSize: 12, marginTop: 6, textAlign: "center", maxWidth: 260, lineHeight: 18 },
+  privateHint: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    marginTop: 14,
     paddingHorizontal: 12,
     paddingVertical: 8,
+    borderRadius: radii.pill,
   },
-  metaLine: { marginTop: 10, flexDirection: "row", alignItems: "center" },
-  chip: { flexDirection: "row", alignItems: "center", paddingHorizontal: 10, paddingVertical: 5, borderRadius: radii.pill, borderWidth: 1 },
-  mutualRow: { flexDirection: "row", alignItems: "center", marginTop: 12, alignSelf: "flex-start" },
-  mutualAvatars: { flexDirection: "row", alignItems: "center" },
-  mutualAvatarWrap: { width: 26, height: 26, borderRadius: 13, borderWidth: 1.5, alignItems: "center", justifyContent: "center", overflow: "hidden" },
-  statsRow: { flexDirection: "row", alignItems: "center", padding: spacing.lg, borderRadius: radii.lg, borderWidth: 1, marginTop: spacing.lg },
-  privateCard: { marginTop: spacing.xl, borderWidth: 1, borderRadius: radii.lg, paddingHorizontal: spacing.lg, paddingVertical: 30, alignItems: "center", overflow: "hidden" },
-  privateBadge: {
+  privateHintText: { fontFamily: fonts.bodyMedium, fontSize: 12 },
+
+  // Gallery
+  sectionHeader: {
     flexDirection: "row",
     alignItems: "center",
-    borderWidth: 1,
-    borderRadius: radii.pill,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    marginBottom: 12,
+    gap: 6,
+    marginTop: spacing.xl,
+    marginBottom: 8,
   },
-  privateIcon: { width: 58, height: 58, borderRadius: 29, alignItems: "center", justifyContent: "center" },
-  privateIconGrad: { width: 58, height: 58, borderRadius: 29, alignItems: "center", justifyContent: "center", shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 12, shadowOffset: { width: 0, height: 6 }, elevation: 5 },
-  privateHint: { flexDirection: "row", alignItems: "center", marginTop: 18, paddingHorizontal: 14, paddingVertical: 9, borderRadius: radii.pill },
-  galleryThumb: { width: 100, height: 130, borderRadius: radii.md, overflow: "hidden", borderWidth: 1, backgroundColor: "#111" },
-  actionPanel: { gap: 10, borderWidth: 1, borderRadius: radii.xl, padding: 14 },
-  primaryBtnWrap: { borderRadius: radii.pill },
+  sectionTitle: { fontSize: 10, fontFamily: fonts.bodySemi, letterSpacing: 1, textTransform: "uppercase" },
+  viewAll: { fontSize: 12, fontFamily: fonts.bodySemi },
+  galleryRow: { flexDirection: "row", gap: 8 },
+  galleryThumb: {
+    width: 88,
+    height: 118,
+    borderRadius: radii.md,
+    overflow: "hidden",
+    borderWidth: 1,
+    backgroundColor: "#111",
+  },
+
+  // Actions
+  actionsCard: {
+    marginTop: spacing.xl,
+    borderRadius: radii.xl,
+    borderWidth: 1,
+    padding: 12,
+    gap: 8,
+  },
+  secondaryRow: { flexDirection: "row", gap: 8 },
   primaryBtn: {
-    height: 52,
+    height: 46,
     borderRadius: radii.pill,
     alignItems: "center",
     justifyContent: "center",
     flexDirection: "row",
+    gap: 8,
     overflow: "hidden",
     shadowColor: "#000",
-    shadowOpacity: 0.2,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 6,
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
   },
-  primaryBtnInnerGlow: {
-    position: "absolute",
-    top: 1,
-    left: 1,
-    right: 1,
-    height: "52%",
-    borderRadius: 999,
+  primaryText: { fontFamily: fonts.bodySemi, fontSize: 14 },
+  secondaryBtn: {
+    flex: 1,
+    height: 42,
+    borderRadius: radii.pill,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 6,
   },
-  secondaryBtn: { height: 48, borderRadius: radii.pill, borderWidth: 1, alignItems: "center", justifyContent: "center", flexDirection: "row", paddingHorizontal: 16 },
+  secondaryText: { fontFamily: fonts.bodyMedium, fontSize: 13 },
 });

@@ -1,0 +1,38 @@
+[
+ {
+  "appeal_id": "apl_597457da29ca41b4",
+  "user_id": "usr_0370ee090f6d4bee",
+  "name": "Kawsar Hosen",
+  "email": "ariyanrifat900@gmail.com",
+  "message": "Fuck you",
+  "suspension_reason": "Violation of Nexus community rules",
+  "status": "rejected",
+  "created_at": "2026-07-08T07:53:29.049599+00:00",
+  "reviewed_at": "2026-07-08T08:02:16.347984+00:00",
+  "reviewed_by": "usr_ce27312ca20244a9"
+ },
+ {
+  "appeal_id": "apl_4eb0684ed0f44d14",
+  "user_id": "usr_ef41f2dc23df4d15",
+  "name": "Elma Akter",
+  "email": "xyteeebusiness@gmail.com",
+  "message": "Sorry mistake cilo please review my id",
+  "suspension_reason": "Spam or abusive activity",
+  "status": "approved",
+  "created_at": "2026-07-08T07:31:49.51279+00:00",
+  "reviewed_at": "2026-07-08T08:29:50.850669+00:00",
+  "reviewed_by": "usr_ce27312ca20244a9"
+ },
+ {
+  "appeal_id": "apl_89f6ac01fbe34b41",
+  "user_id": "usr_72e0fb66b60d45a1",
+  "name": "Kawsar Hosen",
+  "email": "ornilfarabirifat24@gmail.com",
+  "message": "Please solve my problem",
+  "suspension_reason": "Harassment or harmful behavior",
+  "status": "approved",
+  "created_at": "2026-07-08T10:01:40.978541+00:00",
+  "reviewed_at": "2026-07-08T16:00:18.836841+00:00",
+  "reviewed_by": "usr_ce27312ca20244a9"
+ }
+]
