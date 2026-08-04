@@ -5,12 +5,14 @@ import {
   TouchableOpacity,
   Image,
   ScrollView,
+  Platform,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as WebBrowser from "expo-web-browser";
 import * as Google from "expo-auth-session/providers/google";
+import { makeRedirectUri } from "expo-auth-session";
 
 import { useTheme } from "@/src/context/ThemeContext";
 import { useAuth } from "@/src/context/AuthContext";
@@ -32,7 +34,10 @@ export default function Welcome() {
   const GOOGLE_ANDROID_CLIENT_ID = "940343114841-mj0qgb95o1cjsud59j4isb6tp4jm6v2h.apps.googleusercontent.com";
   const GOOGLE_WEB_CLIENT_ID = "940343114841-1jv65pbtqmurbl1hoacnre2iqoqtgq48.apps.googleusercontent.com";
 
-  const redirectUri = `com.googleusercontent.apps.${GOOGLE_ANDROID_CLIENT_ID}:/oauth2redirect`;
+  const redirectUri =
+    Platform.OS === "android"
+      ? `com.googleusercontent.apps.${GOOGLE_ANDROID_CLIENT_ID}:/oauth2redirect`
+      : makeRedirectUri();
 
   const [, googleResponse, promptGoogleAsync] = Google.useIdTokenAuthRequest({
     redirectUri,
