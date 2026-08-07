@@ -58,6 +58,8 @@ import { useVoiceRecorder } from "@/src/hooks/useVoiceRecorder";
 import { usePrivateVoiceCall, formatCallDuration } from "@/src/hooks/usePrivateVoiceCall";
 import { usePrivateVideoCall } from "@/src/hooks/usePrivateVideoCall";
 import { VideoView } from "@/src/components/VideoView";
+import { MediaPicker, type MediaTab } from "@/src/components/MediaPicker";
+import { klipyMedia, klipyStickerMedia, type KlipyGif } from "@/src/api/klipy";
 import { fonts, radii, spacing } from "@/src/theme";
 import { VerifiedBadge } from "@/src/components/VerifiedBadge";
 
@@ -154,7 +156,7 @@ export default function ChatScreen() {
   const [searchQ, setSearchQ] = useState("");
   const [showAttachMenu, setShowAttachMenu] = useState(false);
   const [showLiveDuration, setShowLiveDuration] = useState(false);
-  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [showMediaPicker, setShowMediaPicker] = useState(false);
   const [inputBarHeight, setInputBarHeight] = useState(62);
   const listRef = useRef<FlatList>(null);
   const typingTimer = useRef<any>(null);
@@ -431,6 +433,71 @@ export default function ChatScreen() {
         prev.filter((m) => m.message_id !== tempId)
       );
     }
+  };
+
+  const sendMedia = async (item: KlipyGif, kind: string, url: string, w: number, h: number) => {
+    const body: any = {
+      conversation_id,
+      kind,
+      media: url,
+      content: JSON.stringify({
+        title: item.title,
+        w,
+        h,
+      }),
+    };
+    if (replyTo) body.reply_to = replyTo.message_id;
+
+    const tempId = `temp-${Date.now()}`;
+    const optimisticMessage: any = {
+      message_id: tempId,
+      conversation_id,
+      sender_id: user?.user_id,
+      content: body.content,
+      kind,
+      media: url,
+      created_at: new Date().toISOString(),
+      read_by: [user?.user_id].filter(Boolean),
+      reply_to: replyTo || null,
+      reactions: [],
+    };
+
+    setReplyTo(null);
+    emitTyping(false);
+    setMessages((prev) => [...prev, optimisticMessage]);
+    playSendSound();
+
+    try {
+      const sent = await api<Msg>("/chats/message", {
+        method: "POST",
+        body,
+        token: token!,
+      });
+      setMessages((prev) =>
+        prev.map((m) => (m.message_id === tempId ? sent : m))
+      );
+    } catch {
+      setMessages((prev) =>
+        prev.filter((m) => m.message_id !== tempId)
+      );
+    }
+  };
+
+  const sendGif = async (gif: KlipyGif) => {
+    const media = klipyMedia(gif);
+    if (!media) return;
+    await sendMedia(gif, "gif", media.url, media.width, media.height);
+  };
+
+  const sendSticker = async (sticker: KlipyGif) => {
+    const media = klipyStickerMedia(sticker);
+    if (!media) return;
+    await sendMedia(sticker, "sticker", media.url, media.width, media.height);
+  };
+
+  const handleMediaSelect = (item: KlipyGif, tab: MediaTab) => {
+    if (tab === "sticker") sendSticker(item);
+    else sendGif(item);
   };
 
   const pickMedia = async (type: "image" | "video") => {
@@ -1229,7 +1296,7 @@ export default function ChatScreen() {
                 onChangeText={onChangeText}
                 onFocus={() => {
                   setFocused(true);
-                  setShowEmojiPicker(false);
+                  setShowMediaPicker(false);
                 }}
                 onBlur={() => setFocused(false)}
                 placeholder={editing ? "Edit message…" : "Message"}
@@ -1261,18 +1328,18 @@ export default function ChatScreen() {
               ) : null}
 
               <TouchableOpacity
-                testID="chat-emoji"
+                testID="chat-media"
                 activeOpacity={0.7}
                 onPress={() => {
                   Keyboard.dismiss();
-                  setShowEmojiPicker((v) => !v);
+                  setShowMediaPicker((v) => !v);
                 }}
                 style={styles.emojiBtn}
               >
                 <Feather
                   name="smile"
-                  size={isNarrow ? 19 : 21}
-                  color={showEmojiPicker ? colors.primary : colors.mutedFg}
+                  size={isNarrow ? 18 : 20}
+                  color={showMediaPicker ? colors.primary : colors.mutedFg}
                 />
               </TouchableOpacity>
             </View>
@@ -1329,25 +1396,11 @@ export default function ChatScreen() {
         </View>
       </KeyboardAvoidingView>
 
-      {showEmojiPicker ? (
-        <View
-          style={{
-            height: isShort ? 260 : 330,
-            backgroundColor: colors.background,
-            borderTopWidth: StyleSheet.hairlineWidth,
-            borderTopColor: colors.border,
-          }}
-        >
-          <EmojiKeyboard
-            onEmojiSelected={(emoji) => {
-              onChangeText(text + emoji.emoji);
-            }}
-            enableSearchBar
-            enableRecentlyUsed
-            hideHeader
-          />
-        </View>
-      ) : null}
+      <MediaPicker
+        visible={showMediaPicker}
+        onClose={() => setShowMediaPicker(false)}
+        onSelect={handleMediaSelect}
+      />
 
       {/* ── Actions modal ─────────────────────────────────────────────── */}
       <Modal visible={!!actionMsg && !showReactPicker} transparent animationType="fade" onRequestClose={() => setActionMsg(null)}>
@@ -1380,7 +1433,7 @@ export default function ChatScreen() {
                   numberOfLines={2}
                   style={{ color: colors.foreground, opacity: 0.85 }}
                 >
-                  {actionMsg.kind === "image" ? "📷 Photo" : actionMsg.kind === "voice" ? "🎙 Voice message" : actionMsg.kind === "location" ? "📍 Shared location" : actionMsg.kind === "live_location" ? "📍 Live location" : actionMsg.content || ""}
+                  {actionMsg.kind === "image" ? "📷 Photo" : actionMsg.kind === "gif" ? "🎞️ GIF" : actionMsg.kind === "sticker" ? "🖼️ Sticker" : actionMsg.kind === "voice" ? "🎙 Voice message" : actionMsg.kind === "location" ? "📍 Shared location" : actionMsg.kind === "live_location" ? "📍 Live location" : actionMsg.content || ""}
                 </NxText>
               </View>
             ) : null}
@@ -1584,6 +1637,9 @@ function MessageBubble({
   const isDeleted = m.deleted_for_everyone || m.kind === "deleted";
   const isVoice = m.kind === "voice" && !!m.media;
   const isImage = m.kind === "image" && !!m.media;
+  const isGif = m.kind === "gif" && !!m.media;
+  const isSticker = m.kind === "sticker" && !!m.media;
+  const isMedia = isGif || isSticker;
   const isLocation = m.kind === "location";
   const isLiveLocation = m.kind === "live_location";
   const loc = useMemo(() => {
@@ -1603,6 +1659,17 @@ function MessageBubble({
     } catch {}
     return null;
   }, [isLiveLocation, m.content]);
+
+  const gifMeta = useMemo(() => {
+    if (!isMedia || !m.content) return null;
+    try {
+      const p = JSON.parse(m.content);
+      if (typeof p.w === "number" && typeof p.h === "number")
+        return p as { title?: string; w: number; h: number };
+    } catch {}
+    return null;
+  }, [isMedia, m.content]);
+
   const isRead = (m.read_by?.length || 0) > 1;
   const time = dayjs(m.created_at).format("HH:mm");
   const [mapErr, setMapErr] = useState(false);
@@ -1632,6 +1699,39 @@ function MessageBubble({
   const bubbleMaxWidth = Math.min(screenWidth * 0.78, 320);
   // Image size scales with screen
   const imageSize = Math.min(screenWidth * 0.62, 240);
+
+  const gifDims = useMemo(() => {
+    const base = imageSize;
+    let w = base;
+    let h = 200;
+    if (gifMeta && gifMeta.w > 0 && gifMeta.h > 0) {
+      const aspect = gifMeta.h / gifMeta.w;
+      w = Math.min(base, gifMeta.w);
+      h = Math.round(w * aspect);
+      if (h > 180) {
+        h = 180;
+        w = Math.round(h / aspect);
+      }
+    }
+    return { width: w, height: h };
+  }, [gifMeta, imageSize]);
+
+  // Stickers are rendered mini-sized (like WhatsApp), no bubble background.
+  const stickerDims = useMemo(() => {
+    const base = Math.min(screenWidth * 0.28, 112);
+    let w = base;
+    let h = base;
+    if (gifMeta && gifMeta.w > 0 && gifMeta.h > 0) {
+      const aspect = gifMeta.h / gifMeta.w;
+      w = base;
+      h = Math.round(w * aspect);
+      if (h > 112) {
+        h = 112;
+        w = Math.round(h / aspect);
+      }
+    }
+    return { width: Math.max(48, w), height: Math.max(48, h) };
+  }, [gifMeta, screenWidth]);
 
   const grouped = (m.reactions || []).reduce<Record<string, number>>((acc, r) => {
     acc[r.emoji] = (acc[r.emoji] || 0) + 1;
@@ -1741,13 +1841,13 @@ function MessageBubble({
                 styles.bubble,
                 bubbleRadius,
                 {
-                  backgroundColor: bubbleBg,
-                  paddingVertical: isImage || isLocation || isLiveLocation ? 4 : 11,
-                  paddingHorizontal: isImage || isLocation || isLiveLocation ? 4 : 15,
-                  ...(!isMe && !isImage && !isDeleted && !isLocation
+                  backgroundColor: isSticker ? "transparent" : bubbleBg,
+                  paddingVertical: isImage || isMedia || isLocation || isLiveLocation ? 4 : 11,
+                  paddingHorizontal: isImage || isMedia || isLocation || isLiveLocation ? 4 : 15,
+                  ...(!isMe && !isImage && !isMedia && !isDeleted && !isLocation
                     ? { borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border }
                     : {}),
-                  ...(isImage
+                  ...(isImage || isMedia
                     ? {}
                     : isMe
                       ? (Platform.OS === "web"
@@ -1779,6 +1879,10 @@ function MessageBubble({
                       ? "🎙 Voice message"
                       : replySource.kind === "image"
                       ? "📷 Photo"
+                      : replySource.kind === "gif"
+                      ? "🎞️ GIF"
+                      : replySource.kind === "sticker"
+                      ? "🖼️ Sticker"
                       : replySource.kind === "location"
                       ? "📍 Shared location"
                       : replySource.kind === "live_location"
@@ -1807,6 +1911,22 @@ function MessageBubble({
                   source={{ uri: m.media! }}
                   resizeMode="cover"
                   style={{ width: imageSize, height: imageSize, borderRadius: 14 }}
+                />
+              ) : isGif ? (
+                <Image
+                  source={{ uri: m.media! }}
+                  resizeMode="contain"
+                  style={{
+                    width: gifDims.width,
+                    height: gifDims.height,
+                    borderRadius: 14,
+                  }}
+                />
+              ) : isSticker ? (
+                <Image
+                  source={{ uri: m.media! }}
+                  resizeMode="contain"
+                  style={{ width: stickerDims.width, height: stickerDims.height }}
                 />
               ) : isLocation && loc ? (
                 <View style={{ borderRadius: 14, overflow: "hidden", width: imageSize }}>
@@ -2146,6 +2266,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     marginLeft: 4,
+  },
+  stickerMarkText: {
+    color: "#FFFFFF",
+    fontSize: 8,
+    fontFamily: "Outfit-SemiBold",
+    letterSpacing: 0.3,
+    marginTop: 1,
+    opacity: 0.55,
   },
   sendBtn: {
     width: 44,

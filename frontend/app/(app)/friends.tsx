@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { View, StyleSheet, TouchableOpacity, FlatList, ActivityIndicator, ScrollView, RefreshControl } from "react-native";
+import { View, StyleSheet, TouchableOpacity, FlatList, ActivityIndicator, ScrollView, RefreshControl, Alert } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import { Feather } from "@expo/vector-icons";
@@ -35,6 +35,8 @@ export default function Friends() {
   const [loading, setLoading] = useState(() => friendsCache === null);
   const [refreshing, setRefreshing] = useState(false);
   const [networkError, setNetworkError] = useState(false);
+  const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
+  const [acceptedToast, setAcceptedToast] = useState<string | null>(null);
 
   // Seed from the last saved session so the list shows instantly (like profile)
   // while the background refresh runs.
@@ -98,9 +100,79 @@ export default function Friends() {
     });
   }, [subscribe, load]);
 
-  const accept = async (uid: string) => { await api("/friends/accept", { method: "POST", body: { user_id: uid }, token: token! }); load(); };
-  const reject = async (uid: string) => { await api("/friends/reject", { method: "POST", body: { user_id: uid }, token: token! }); load(); };
-  const cancel = async (uid: string) => { await api("/friends/cancel", { method: "POST", body: { user_id: uid }, token: token! }); load(); };
+  const setBusy = (uid: string, busy: boolean) => {
+    setBusyIds((prev) => {
+      const next = new Set(prev);
+      if (busy) next.add(uid);
+      else next.delete(uid);
+      return next;
+    });
+  };
+
+  const accept = async (uid: string, name?: string) => {
+    if (busyIds.has(uid)) return;
+    setBusy(uid, true);
+    // Optimistic: remove the request immediately so the user sees a fast,
+    // clear response. Restored below if the POST fails.
+    setIncoming((prev) => prev.filter((r) => r.from_user !== uid));
+    try {
+      const res = await api<{ ok?: boolean }>("/friends/accept", { method: "POST", body: { user_id: uid }, token: token! });
+      const ok = res?.ok === true;
+      setAcceptedToast(`${name || "Request"} accepted — you are now bonded`);
+      if (ok) {
+        // Prepend the newly bonded user to the Friends list (from the request row).
+        const req = friendsCache?.incoming?.find((r) => r.from_user === uid);
+        const buddy = req?.user ? { ...req.user, user_id: uid } : null;
+        if (buddy) {
+          setFriends((prev) => {
+            if (prev.some((f) => f.user_id === uid)) return prev;
+            return [buddy, ...prev];
+          });
+          friendsCache = {
+            friends: [buddy, ...(friendsCache?.friends || [])],
+            incoming: friendsCache?.incoming?.filter((r) => r.from_user !== uid) || [],
+            outgoing: friendsCache?.outgoing || [],
+          };
+        }
+      }
+      setTimeout(() => setAcceptedToast(null), 3000);
+      load();
+    } catch (e: any) {
+      // Roll back the optimistic removal so the request stays visible.
+      setIncoming((prev) => (prev.some((r) => r.from_user === uid) ? prev : [...prev]));
+      Alert.alert("Couldn't accept", e?.message || "Something went wrong. Please try again.");
+    } finally {
+      setBusy(uid, false);
+    }
+  };
+
+  const reject = async (uid: string) => {
+    if (busyIds.has(uid)) return;
+    setBusy(uid, true);
+    setIncoming((prev) => prev.filter((r) => r.from_user !== uid));
+    try {
+      await api("/friends/reject", { method: "POST", body: { user_id: uid }, token: token! });
+      load();
+    } catch (e: any) {
+      setIncoming((prev) => (prev.some((r) => r.from_user === uid) ? prev : [...prev]));
+      Alert.alert("Couldn't reject", e?.message || "Something went wrong. Please try again.");
+    } finally {
+      setBusy(uid, false);
+    }
+  };
+
+  const cancel = async (uid: string) => {
+    if (busyIds.has(uid)) return;
+    setBusy(uid, true);
+    try {
+      await api("/friends/cancel", { method: "POST", body: { user_id: uid }, token: token! });
+      load();
+    } catch (e: any) {
+      Alert.alert("Couldn't cancel", e?.message || "Something went wrong. Please try again.");
+    } finally {
+      setBusy(uid, false);
+    }
+  };
 
   const openChat = async (uid: string) => {
     const r = await api<{ conversation: any }>("/chats/open", { method: "POST", body: { user_id: uid }, token: token! });
@@ -145,6 +217,26 @@ export default function Friends() {
           <Feather name="wifi-off" size={15} color={colors.mutedFg} />
           <NxText variant="caption" style={{ marginLeft: 8 }}>
             No connection · Showing saved data
+          </NxText>
+        </View>
+      ) : null}
+
+      {acceptedToast ? (
+        <View
+          style={{
+            marginHorizontal: spacing.lg,
+            marginTop: spacing.sm,
+            paddingHorizontal: 14,
+            paddingVertical: 9,
+            borderRadius: radii.pill,
+            backgroundColor: colors.primary,
+            flexDirection: "row",
+            alignItems: "center",
+          }}
+        >
+          <Feather name="check-circle" size={15} color={colors.onPrimary} />
+          <NxText variant="caption" style={{ marginLeft: 8, color: colors.onPrimary }}>
+            {acceptedToast}
           </NxText>
         </View>
       ) : null}
@@ -218,10 +310,14 @@ export default function Friends() {
                 </View>
                 <NxText variant="bodySm">@{r.user?.username}</NxText>
               </View>
-              <TouchableOpacity testID={`req-accept-${r.user?.username}`} onPress={() => accept(r.from_user)} style={[styles.smallBtn, { backgroundColor: colors.primary }]}>
-                <NxText style={{ color: colors.onPrimary, fontFamily: fonts.bodySemi, fontSize: 13 }}>Accept</NxText>
+              <TouchableOpacity testID={`req-accept-${r.user?.username}`} disabled={busyIds.has(r.from_user)} onPress={() => accept(r.from_user, r.user?.display_name)} style={[styles.smallBtn, { backgroundColor: colors.primary, opacity: busyIds.has(r.from_user) ? 0.6 : 1 }]}>
+                {busyIds.has(r.from_user) ? (
+                  <ActivityIndicator size="small" color={colors.onPrimary} />
+                ) : (
+                  <NxText style={{ color: colors.onPrimary, fontFamily: fonts.bodySemi, fontSize: 13 }}>Accept</NxText>
+                )}
               </TouchableOpacity>
-              <TouchableOpacity testID={`req-reject-${r.user?.username}`} onPress={() => reject(r.from_user)} style={[styles.smallBtn, { borderColor: colors.border, borderWidth: 1, marginLeft: 8 }]}>
+              <TouchableOpacity testID={`req-reject-${r.user?.username}`} disabled={busyIds.has(r.from_user)} onPress={() => reject(r.from_user)} style={[styles.smallBtn, { borderColor: colors.border, borderWidth: 1, marginLeft: 8, opacity: busyIds.has(r.from_user) ? 0.6 : 1 }]}>
                 <NxText style={{ color: colors.foreground, fontFamily: fonts.bodySemi, fontSize: 13 }}>Reject</NxText>
               </TouchableOpacity>
             </View>
@@ -235,8 +331,12 @@ export default function Friends() {
                 <NxText variant="titleSm">{r.user?.display_name}</NxText>
                 <NxText variant="bodySm">@{r.user?.username}</NxText>
               </View>
-              <TouchableOpacity testID={`req-cancel-${r.user?.username}`} onPress={() => cancel(r.to_user)} style={[styles.smallBtn, { borderColor: colors.border, borderWidth: 1 }]}>
-                <NxText style={{ color: colors.foreground, fontFamily: fonts.bodySemi, fontSize: 13 }}>Cancel</NxText>
+              <TouchableOpacity testID={`req-cancel-${r.user?.username}`} disabled={busyIds.has(r.to_user)} onPress={() => cancel(r.to_user)} style={[styles.smallBtn, { borderColor: colors.border, borderWidth: 1, opacity: busyIds.has(r.to_user) ? 0.6 : 1 }]}>
+                {busyIds.has(r.to_user) ? (
+                  <ActivityIndicator size="small" color={colors.foreground} />
+                ) : (
+                  <NxText style={{ color: colors.foreground, fontFamily: fonts.bodySemi, fontSize: 13 }}>Cancel</NxText>
+                )}
               </TouchableOpacity>
             </View>
           ))}

@@ -808,10 +808,12 @@ async def _push_notification(to_user: str, kind: str, data: dict):
         await run(lambda: sb.table("notifications").insert(notif).execute())
         await broadcast_to_user(to_user, {"type": "notification", "notification": notif})
 
+    # Expo push is fire-and-forget: it can take up to 10s, and callers (like
+    # friend accept) should not block the HTTP response on push delivery.
     try:
-        await _send_expo_push(to_user, kind, data)
+        asyncio.ensure_future(_send_expo_push(to_user, kind, data))
     except Exception as e:
-        logger.warning("Expo push failed: %s", e)
+        logger.warning("Expo push scheduling failed: %s", e)
 
 
 # ── Auth ───────────────────────────────────────────────────────────────────────
@@ -3365,6 +3367,10 @@ async def send_message(body: MessageIn, user=Depends(current_user)):
     await run(lambda: sb.table("messages").insert(msg).execute())
     if body.kind == "text":
         preview = body.content[:80]
+    elif body.kind == "gif":
+        preview = "🎞️ GIF"
+    elif body.kind == "sticker":
+        preview = "🖼️ Sticker"
     elif body.kind == "live_location":
         preview = "📍 Live location"
     elif body.kind == "location":

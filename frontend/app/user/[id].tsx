@@ -77,13 +77,16 @@ export default function UserProfile() {
   const act = async (path: string) => {
     setBusy(true);
     if (path === "/friends/request") setOptimisticRelation("requested");
-    else if (path === "/friends/cancel") setOptimisticRelation(null);
+    else if (path === "/friends/cancel") setOptimisticRelation("open");
     else if (path === "/friends/accept") setOptimisticRelation("friend");
-    else if (path === "/friends/reject") setOptimisticRelation(null);
+    else if (path === "/friends/reject" || path === "/friends/unfriend" || path === "/friends/unblock") setOptimisticRelation("open");
+    else if (path === "/friends/block") setOptimisticRelation("blocked");
     try {
       await api(path, { method: "POST", body: { user_id: resolvedId }, token: token! });
+      // Keep the optimistic relation visible until the fresh profile data
+      // arrives, otherwise the button flickers back to "Accept Bond".
+      await load();
       setOptimisticRelation(null);
-      load();
     } catch {
       setOptimisticRelation(null);
     } finally { setBusy(false); }
@@ -391,37 +394,50 @@ export default function UserProfile() {
               <View style={[styles.actionsCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
                 <PrimaryButton colors={colors} icon="message-circle" label="Message" onPress={openChat} />
                 <View style={styles.secondaryRow}>
-                  <TouchableOpacity disabled={busy} onPress={() => act("/friends/unfriend")} style={[styles.secondaryBtn, { borderColor: colors.border }]}>
-                    <Feather name="user-minus" size={14} color={colors.foreground} />
-                    <NxText style={[styles.secondaryText, { color: colors.foreground }]}>Unfriend</NxText>
+                  <TouchableOpacity
+                    disabled={busy}
+                    onPress={() => {
+                      Alert.alert(
+                        "Unfriend?",
+                        `Unfriend @${u.username}? They'll no longer be your bond and you can send a new request later.`,
+                        [
+                          { text: "Cancel", style: "cancel" },
+                          { text: "Unfriend", style: "destructive", onPress: () => act("/friends/unfriend") },
+                        ]
+                      );
+                    }}
+                    style={[styles.secondaryBtn, { borderColor: colors.border }]}
+                  >
+                    {busy ? <ActivityIndicator size="small" color={colors.foreground} /> : <Feather name="user-minus" size={14} color={colors.foreground} />}
+                    <NxText style={[styles.secondaryText, { color: colors.foreground }]}>{busy ? "Unfriending…" : "Unfriend"}</NxText>
                   </TouchableOpacity>
                 </View>
               </View>
             ) : effectiveRelation === "requested" ? (
               <View style={[styles.actionsCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
                 <TouchableOpacity disabled={busy} onPress={() => act("/friends/cancel")} style={[styles.secondaryBtn, { borderColor: "#F0B232" + "33" }]}>
-                  <Feather name="clock" size={14} color="#F0B232" />
-                  <NxText style={[styles.secondaryText, { color: "#F0B232" }]}>Cancel Request</NxText>
+                  {busy ? <ActivityIndicator size="small" color="#F0B232" /> : <Feather name="clock" size={14} color="#F0B232" />}
+                  <NxText style={[styles.secondaryText, { color: "#F0B232" }]}>{busy ? "Cancelling…" : "Cancel Request"}</NxText>
                 </TouchableOpacity>
               </View>
             ) : effectiveRelation === "incoming" ? (
               <View style={[styles.actionsCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                <PrimaryButton colors={colors} icon="user-check" label="Accept Bond" onPress={() => act("/friends/accept")} disabled={busy} />
+                <PrimaryButton colors={colors} icon="user-check" label={busy ? "Accepting…" : "Accept Bond"} onPress={() => act("/friends/accept")} disabled={busy} loading={busy} />
                 <TouchableOpacity disabled={busy} onPress={() => act("/friends/reject")} style={[styles.secondaryBtn, { borderColor: colors.border }]}>
-                  <Feather name="x" size={14} color={colors.foreground} />
-                  <NxText style={[styles.secondaryText, { color: colors.foreground }]}>Decline</NxText>
+                  {busy ? <ActivityIndicator size="small" color={colors.foreground} /> : <Feather name="x" size={14} color={colors.foreground} />}
+                  <NxText style={[styles.secondaryText, { color: colors.foreground }]}>{busy ? "Declining…" : "Decline"}</NxText>
                 </TouchableOpacity>
               </View>
             ) : effectiveRelation === "blocked" ? (
               <View style={[styles.actionsCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
                 <TouchableOpacity disabled={busy} onPress={() => act("/friends/unblock")} style={[styles.secondaryBtn, { borderColor: colors.border }]}>
-                  <Feather name="slash" size={14} color={colors.foreground} />
-                  <NxText style={[styles.secondaryText, { color: colors.foreground }]}>Unblock</NxText>
+                  {busy ? <ActivityIndicator size="small" color={colors.foreground} /> : <Feather name="slash" size={14} color={colors.foreground} />}
+                  <NxText style={[styles.secondaryText, { color: colors.foreground }]}>{busy ? "Unblocking…" : "Unblock"}</NxText>
                 </TouchableOpacity>
               </View>
             ) : (
               <View style={[styles.actionsCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                <PrimaryButton colors={colors} icon="user-plus" label="Send Bond Request" onPress={() => act("/friends/request")} disabled={busy} />
+                <PrimaryButton colors={colors} icon="user-plus" label={busy ? "Sending…" : "Send Bond Request"} onPress={() => act("/friends/request")} disabled={busy} loading={busy} />
                 {!u.private_locked && (
                   <PrimaryButton colors={colors} icon="message-circle" label="Message" onPress={openChat} />
                 )}
@@ -447,13 +463,14 @@ function StatItem({ value, label, color, muted }: { value: any; label: string; c
 }
 
 function PrimaryButton({
-  colors, icon, label, onPress, disabled,
+  colors, icon, label, onPress, disabled, loading,
 }: {
   colors: any;
   icon: keyof typeof Feather.glyphMap;
   label: string;
   onPress: () => void;
   disabled?: boolean;
+  loading?: boolean;
 }) {
   const pressed = useSharedValue(0);
   const animStyle = useAnimatedStyle(() => ({
@@ -468,7 +485,11 @@ function PrimaryButton({
           start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
           style={StyleSheet.absoluteFillObject}
         />
-        <Feather name={icon} size={15} color={disabled ? colors.mutedFg : colors.onPrimary} />
+        {loading ? (
+          <ActivityIndicator size="small" color={disabled ? colors.mutedFg : colors.onPrimary} />
+        ) : (
+          <Feather name={icon} size={15} color={disabled ? colors.mutedFg : colors.onPrimary} />
+        )}
         <NxText style={[styles.primaryText, { color: disabled ? colors.mutedFg : colors.onPrimary }]}>
           {label}
         </NxText>
