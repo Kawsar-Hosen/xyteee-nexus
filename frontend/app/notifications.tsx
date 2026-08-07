@@ -44,6 +44,7 @@ const KIND_META: Record<string, KindMeta> = {
   // core Xyteee kinds
   friend_request: { icon: "user-plus", color: "#F0B232" },
   friend_accepted: { icon: "user-check", color: "#2E9B67" },
+  friend_rejected: { icon: "user-x", color: "#D97706" },
   message: { icon: "message-circle", color: "#4A90E2" },
   circle_message: { icon: "message-square", color: "#4A90E2" },
   story: { icon: "aperture", color: "#8B5CF6" },
@@ -89,6 +90,8 @@ function buildDescription(n: any): string {
       return "sent you a bond request";
     case "friend_accepted":
       return "accepted your bond";
+    case "friend_rejected":
+      return "declined your bond request";
     case "message":
     case "circle_message":
       return n.data?.preview || "Sent you a message";
@@ -250,7 +253,8 @@ export default function Notifications() {
         router.push(`/chat/${item.data.conversation_id}`);
       } else if (
         item.kind === "friend_request" ||
-        item.kind === "friend_accepted"
+        item.kind === "friend_accepted" ||
+        item.kind === "friend_rejected"
       ) {
         router.push("/(app)/friends");
       } else if (
@@ -274,7 +278,7 @@ export default function Notifications() {
           item.kind === "mention") &&
         (item.data?.from || item.sender?.user_id)
       ) {
-        router.push(`/user/${item.data?.from || item.sender?.user_id}`);
+        router.push(`/user/${item.sender?.username || item.data?.from || item.sender?.user_id}`);
       }
     },
     [markRead, router]
@@ -386,7 +390,7 @@ export default function Notifications() {
           `You won't see notifications from @${item.sender?.username || getName(item)} anymore.`
         );
       } else if (action === "profile") {
-        const uid = item.data?.from || item.sender?.user_id;
+        const uid = item.sender?.username || item.data?.from || item.sender?.user_id;
         if (uid) router.push(`/user/${uid}`);
       }
     },

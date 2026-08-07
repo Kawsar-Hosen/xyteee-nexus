@@ -146,8 +146,8 @@ export default function Search() {
     loadDiscoverMoreAccounts();
   }, [loadRecentAccounts, loadDiscoverMoreAccounts]);
 
-  const openUser = (userId: string) => {
-    router.push(`/user/${userId}`);
+  const openUser = (item: any) => {
+    router.push(`/user/${item.username || item.user_id}`);
   };
 
   const sendBondRequest = async (userId: string) => {
@@ -175,7 +175,7 @@ export default function Search() {
     <TouchableOpacity
       key={item.user_id}
       activeOpacity={0.8}
-      onPress={() => openUser(item.user_id)}
+      onPress={() => openUser(item)}
       style={styles.row}
     >
       <Avatar
@@ -353,7 +353,7 @@ export default function Search() {
                   <TouchableOpacity
                     key={item.user_id}
                     activeOpacity={0.85}
-                    onPress={() => openUser(item.user_id)}
+                    onPress={() => openUser(item)}
                     style={[
                       styles.personCard,
                       {

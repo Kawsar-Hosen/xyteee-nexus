@@ -22,7 +22,7 @@ import { fonts, radii, spacing } from "@/src/theme";
 
 export default function SetupProfile() {
   const { colors } = useTheme();
-  const { user, updateUser } = useAuth();
+  const { user, token, updateUser } = useAuth();
   const router = useRouter();
   const [avatar, setAvatar] = useState(user?.profile_picture || "");
   const [saving, setSaving] = useState(false);
@@ -76,7 +76,7 @@ export default function SetupProfile() {
     const asset = result.assets[0];
     setSaving(true);
     try {
-      const url = await uploadFile(asset.uri, "profiles", user?.user_id || "", asset.fileName || undefined);
+      const url = await uploadFile(asset.uri, "profiles", token || "", asset.fileName || undefined);
       if (target === "avatar") setAvatar(url);
       else setCover(url);
     } finally { setSaving(false); }

@@ -18,8 +18,10 @@ import Animated, {
 import { useTheme } from "@/src/context/ThemeContext";
 import { useAuth } from "@/src/context/AuthContext";
 import { api } from "@/src/api/client";
+import { uploadFile } from "@/src/api/upload";
 import { NxText } from "@/src/components/NxText";
 import { Avatar } from "@/src/components/Avatar";
+import { CoverWatermark } from "@/src/components/CoverWatermark";
 import { VerifiedBadge } from "@/src/components/VerifiedBadge";
 import { fonts, radii, spacing } from "@/src/theme";
 import { DOCK_PAD } from "@/src/theme/layout";
@@ -70,18 +72,43 @@ export default function Profile() {
     }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.85,
-      base64: true,
+      quality: 0.6,
       allowsEditing: true,
       aspect: [1, 1],
     });
-    if (result.canceled || !result.assets?.[0]?.base64) return;
-    const dataUrl = `data:image/jpeg;base64,${result.assets[0].base64}`;
+    if (result.canceled || !result.assets?.[0]) return;
     setUploadingPhoto(true);
     try {
-      await updateUser({ profile_picture: dataUrl });
+      const asset = result.assets[0];
+      const url = await uploadFile(asset.uri, "profiles", token || "", asset.fileName || undefined);
+      await updateUser({ profile_picture: url });
     } catch {
       Alert.alert("Upload failed", "Could not update profile photo. Please try again.");
+    } finally {
+      setUploadingPhoto(false);
+    }
+  };
+
+  const pickCoverPhoto = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== "granted") {
+      Alert.alert("Permission needed", "Allow photo access to change your cover photo.");
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.6,
+      allowsEditing: true,
+      aspect: [16, 9],
+    });
+    if (result.canceled || !result.assets?.[0]) return;
+    setUploadingPhoto(true);
+    try {
+      const asset = result.assets[0];
+      const url = await uploadFile(asset.uri, "profiles", token || "", asset.fileName || undefined);
+      await updateUser({ cover_picture: url });
+    } catch {
+      Alert.alert("Upload failed", "Could not update cover photo. Please try again.");
     } finally {
       setUploadingPhoto(false);
     }
@@ -150,7 +177,7 @@ export default function Profile() {
   const handleShare = async () => {
     try {
       await Share.share({
-        message: `Check out @${user.username} on Xyteee!\nhttps://xyteee.app/user/${user.user_id}`,
+        message: `Check out @${user.username} on Xyteee!\nhttps://xyteee.com/user/${user.username}`,
         title: user.display_name,
       });
     } catch { /* cancelled */ }
@@ -171,38 +198,37 @@ export default function Profile() {
         <View style={styles.mobileWrapper}>
 
         {/* ═══════════════ COVER ═══════════════ */}
-        <View style={[styles.coverWrap, { height: COVER_H }]}>
+        <Pressable
+          onPress={!user.cover_picture ? pickCoverPhoto : undefined}
+          disabled={uploadingPhoto}
+          style={({ pressed }) => [
+            styles.coverWrap,
+            { height: COVER_H, backgroundColor: colors.surfaceHigh },
+            pressed && styles.coverPressed,
+          ]}
+        >
           {user.cover_picture ? (
             <Image source={{ uri: user.cover_picture }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
           ) : (
-            <LinearGradient
-              colors={[colors.primaryDeep, colors.primary, `${colors.primary}44`]}
-              start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-              style={StyleSheet.absoluteFillObject}
-            />
+            <>
+              <CoverWatermark />
+              {/* Add cover hint (no photo yet) */}
+              <View style={styles.coverAddHint} pointerEvents="none">
+                <View style={[styles.coverAddBadge, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                  <Feather name="camera" size={15} color={colors.foreground} />
+                </View>
+                <NxText style={[styles.coverAddText, { color: colors.foreground }]}>Add a cover</NxText>
+              </View>
+            </>
           )}
-          {/* Subtle overlay */}
-          <LinearGradient
-            colors={["rgba(0,0,0,0.12)", "transparent", "rgba(0,0,0,0.45)"]}
-            style={StyleSheet.absoluteFillObject}
-          />
-          {/* Bottom fade into background */}
-          <LinearGradient
-            colors={["transparent", colors.background]}
-            start={{ x: 0, y: 0.65 }} end={{ x: 0, y: 1 }}
-            style={StyleSheet.absoluteFillObject}
-          />
 
           {/* Header action buttons */}
           <View style={styles.coverActions}>
-            <TouchableOpacity onPress={handleShare} style={[styles.glassBtn, { backgroundColor: "rgba(0,0,0,0.35)" }]}>
-              <Feather name="share-2" size={17} color="#fff" />
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => router.push("/settings")} style={[styles.glassBtn, { backgroundColor: "rgba(0,0,0,0.35)" }]}>
-              <Feather name="settings" size={17} color="#fff" />
+            <TouchableOpacity onPress={() => router.push("/settings")} style={[styles.glassBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <Feather name="settings" size={16} color={colors.foreground} />
             </TouchableOpacity>
           </View>
-        </View>
+        </Pressable>
 
         {/* ═══════════════ AVATAR + IDENTITY ═══════════════ */}
         <Animated.View entering={FadeInUp.duration(500).springify()} style={styles.identitySection}>
@@ -353,7 +379,7 @@ export default function Profile() {
             <View style={styles.metaRow}>
               {user.website ? (
                 <TouchableOpacity
-                  onPress={() => Linking.openURL(user.website.startsWith("http") ? user.website : `https://${user.website}`)}
+                  onPress={() => Linking.openURL(user.website!.startsWith("http") ? user.website! : `https://${user.website!}`)}
                   style={styles.metaItem}
                 >
                   <Feather name="link" size={13} color={colors.primary} />
@@ -449,7 +475,6 @@ export default function Profile() {
               <SettingRowItem
                 icon="edit-2"
                 iconColor={colors.primary}
-                iconBg={colors.primary + "1F"}
                 label="Edit profile"
                 sub="Name, bio, photos & birthday"
                 colors={colors}
@@ -458,7 +483,6 @@ export default function Profile() {
               <SettingRowItem
                 icon={mode === "dark" ? "sun" : "moon"}
                 iconColor="#fbbf24"
-                iconBg="#fbbf241F"
                 label={mode === "dark" ? "Light mode" : "Dark mode"}
                 sub="Switch your look"
                 colors={colors}
@@ -474,7 +498,6 @@ export default function Profile() {
               <SettingRowItem
                 icon="eye-off"
                 iconColor="#23A55A"
-                iconBg="#23A55A1F"
                 label="Private account"
                 sub="Only your Bonds can see you"
                 colors={colors}
@@ -504,7 +527,6 @@ export default function Profile() {
               <SettingRowItem
                 icon="bell"
                 iconColor={colors.primary}
-                iconBg={colors.primary + "1F"}
                 label="Notifications"
                 sub="Alerts & activity"
                 badge={notifCount > 0 ? (notifCount > 9 ? "9+" : String(notifCount)) : undefined}
@@ -515,7 +537,6 @@ export default function Profile() {
               <SettingRowItem
                 icon="users"
                 iconColor="#a78bfa"
-                iconBg="#a78bfa1F"
                 label="My Bonds"
                 sub="Friends & connections"
                 badge={bondsCount > 0 ? String(bondsCount) : undefined}
@@ -527,8 +548,7 @@ export default function Profile() {
                 <SettingRowItem
                   icon="shield"
                   iconColor={colors.primary}
-                  iconBg={colors.primary + "1F"}
-                  label="Admin control"
+                    label="Admin control"
                   sub="Manage the platform"
                   colors={colors}
                   onPress={() => router.push("/admin")}
@@ -543,7 +563,6 @@ export default function Profile() {
               <SettingRowItem
                 icon="key"
                 iconColor="#F0B232"
-                iconBg="#F0B2321F"
                 label="Change password"
                 sub="Keep your account safe"
                 colors={colors}
@@ -552,7 +571,6 @@ export default function Profile() {
               <SettingRowItem
                 icon="slash"
                 iconColor="#f472b6"
-                iconBg="#f472b61F"
                 label="Blocked users"
                 sub="Manage blocked people"
                 colors={colors}
@@ -561,7 +579,6 @@ export default function Profile() {
               <SettingRowItem
                 icon="file-text"
                 iconColor="#60a5fa"
-                iconBg="#60a5fa1F"
                 label="Privacy policy"
                 sub="How we handle your data"
                 colors={colors}
@@ -570,7 +587,6 @@ export default function Profile() {
               <SettingRowItem
                 icon="user-x"
                 iconColor={colors.danger}
-                iconBg={colors.danger + "1F"}
                 label="Delete account"
                 sub="Permanently remove everything"
                 colors={colors}
@@ -585,8 +601,8 @@ export default function Profile() {
               onPress={() => setLogoutConfirmOpen(true)}
               style={[styles.signOutCard, { backgroundColor: colors.danger + "14", borderColor: colors.danger + "55" }]}
             >
-              <View style={[styles.signOutIcon, { backgroundColor: colors.danger + "22" }]}>
-                <Feather name="log-out" size={19} color={colors.danger} />
+              <View style={[styles.signOutIcon, { backgroundColor: colors.danger }]}>
+                <Feather name="log-out" size={19} color="#fff" />
               </View>
               <View style={{ flex: 1, marginLeft: 14 }}>
                 <NxText style={[styles.signOutLabel, { color: colors.danger }]}>Sign out</NxText>
@@ -768,7 +784,7 @@ function StatCol({ value, label, accent }: { value: string; label: string; accen
 function SectionLabel({ icon, label, colors, children }: any) {
   return (
     <View style={styles.sectionLabelRow}>
-      <View style={[styles.sectionDot, { backgroundColor: colors.primary }]} />
+      <Feather name={icon} size={13} color={colors.mutedFg} />
       <NxText style={[styles.sectionLabelText, { color: colors.mutedFg }]}>{label.toUpperCase()}</NxText>
       {children && <View style={{ marginLeft: "auto" }}>{children}</View>}
     </View>
@@ -786,7 +802,6 @@ function MenuCard({ children, colors }: { children: React.ReactNode; colors: any
 function SettingRowItem({
   icon,
   iconColor,
-  iconBg,
   label,
   sub,
   badge,
@@ -798,7 +813,6 @@ function SettingRowItem({
 }: {
   icon: any;
   iconColor: string;
-  iconBg: string;
   label: string;
   sub?: string;
   badge?: string;
@@ -815,8 +829,8 @@ function SettingRowItem({
       activeOpacity={0.75}
       style={[styles.settingRow, !last && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border }]}
     >
-      <View style={[styles.settingIcon, { backgroundColor: iconBg }]}>
-        <Feather name={icon} size={16} color={iconColor} strokeWidth={2.2} />
+      <View style={[styles.settingIcon, { backgroundColor: iconColor }]}>
+        <Feather name={icon} size={16} color="#fff" strokeWidth={2.2} />
       </View>
       <View style={styles.settingTextWrap}>
         <View style={styles.settingTitleRow}>
@@ -863,6 +877,30 @@ const styles = StyleSheet.create({
     alignSelf: "center",
   },
   coverWrap: { position: "relative", overflow: "hidden" },
+  coverPressed: { opacity: 0.85 },
+  coverAddHint: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    left: 0,
+    right: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  coverAddBadge: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  coverAddText: {
+    fontFamily: fonts.bodySemi,
+    fontSize: 13,
+    letterSpacing: 0.5,
+  },
   coverActions: {
     position: "absolute",
     top: spacing.md,
@@ -873,13 +911,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   glassBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
   },
-
   // Identity
   identitySection: { alignItems: "center", marginTop: -AVATAR_SIZE / 2 - 4, paddingBottom: spacing.md },
   avatarRow: { marginBottom: spacing.sm },
@@ -1066,7 +1104,6 @@ const styles = StyleSheet.create({
     marginTop: spacing.xl,
     marginBottom: 8,
   },
-  sectionDot: { width: 5, height: 5, borderRadius: 3 },
   sectionLabelText: {
     fontSize: 10,
     fontFamily: fonts.bodySemi,
@@ -1074,16 +1111,11 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
   },
 
-  // Menu card
+  // Menu card — light rounded corners
   menuCard: {
-    borderRadius: radii.xl,
+    borderRadius: radii.md,
     borderWidth: 1,
     overflow: "hidden",
-    shadowColor: "#000",
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
   },
 
   // Setting rows
@@ -1095,9 +1127,9 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   settingIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 11,
+    width: 34,
+    height: 34,
+    borderRadius: 10,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -1123,20 +1155,20 @@ const styles = StyleSheet.create({
   },
   settingBadgeText: { color: "#fff", fontSize: 10, fontFamily: fonts.bodySemi },
 
-  // Sign out card
+  // Sign out card — light rounded corners
   signOutCard: {
     flexDirection: "row",
     alignItems: "center",
     marginTop: spacing.md,
-    borderRadius: radii.xl,
+    borderRadius: radii.md,
     borderWidth: 1,
     paddingHorizontal: spacing.md,
     paddingVertical: 13,
   },
   signOutIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
+    width: 34,
+    height: 34,
+    borderRadius: 10,
     alignItems: "center",
     justifyContent: "center",
   },

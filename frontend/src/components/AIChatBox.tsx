@@ -490,7 +490,7 @@ function MessageBubble({
                 key={u.user_id}
                 user={u}
                 colors={colors}
-                onViewProfile={() => { onClose(); router.push(`/user/${u.user_id}` as any); }}
+                onViewProfile={() => { onClose(); router.push(`/user/${u.username || u.user_id}` as any); }}
               />
             ))}
           </View>

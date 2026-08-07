@@ -19,6 +19,7 @@ import { useAuth } from "@/src/context/AuthContext";
 import { api } from "@/src/api/client";
 import { NxText } from "@/src/components/NxText";
 import { Avatar } from "@/src/components/Avatar";
+import { CoverWatermark } from "@/src/components/CoverWatermark";
 import { VerifiedBadge } from "@/src/components/VerifiedBadge";
 import { AnimatedStatusText } from "@/src/components/AnimatedStatusText";
 import { fonts, radii, spacing } from "@/src/theme";
@@ -33,6 +34,7 @@ export default function UserProfile() {
   const router = useRouter();
 
   const [u, setU] = useState<any>(null);
+  const [resolvedId, setResolvedId] = useState<string>(id);
   const [notFound, setNotFound] = useState(false);
   const [busy, setBusy] = useState(false);
   const [hasStory, setHasStory] = useState(false);
@@ -48,10 +50,12 @@ export default function UserProfile() {
       setNotFound(false);
       const r = await api<any>(`/users/${id}`, { token });
       setU(r);
+      const uid = r?.user_id || id;
+      setResolvedId(uid);
       try {
         const storyResult = await api<{ feed: any[] }>("/stories/feed", { token });
         const group = (storyResult.feed || []).find(
-          (g: any) => g.user?.user_id === id && (g.stories || []).length > 0
+          (g: any) => g.user?.user_id === uid && (g.stories || []).length > 0
         );
         setHasStory(!!group);
         const imgs = (group?.stories || [])
@@ -77,7 +81,7 @@ export default function UserProfile() {
     else if (path === "/friends/accept") setOptimisticRelation("friend");
     else if (path === "/friends/reject") setOptimisticRelation(null);
     try {
-      await api(path, { method: "POST", body: { user_id: id }, token: token! });
+      await api(path, { method: "POST", body: { user_id: resolvedId }, token: token! });
       setOptimisticRelation(null);
       load();
     } catch {
@@ -86,14 +90,14 @@ export default function UserProfile() {
   };
 
   const openChat = async () => {
-    const r = await api<{ conversation: any }>("/chats/open", { method: "POST", body: { user_id: id }, token: token! });
+    const r = await api<{ conversation: any }>("/chats/open", { method: "POST", body: { user_id: resolvedId }, token: token! });
     router.push(`/chat/${r.conversation.conversation_id}`);
   };
 
   const handleShare = async () => {
     try {
       await Share.share({
-        message: `Check out @${u?.username} on Xyteee!\nhttps://xyteee.app/user/${id}`,
+        message: `Check out @${u?.username} on Xyteee!\nhttps://xyteee.com/user/${u?.username}`,
         title: u?.display_name,
       });
     } catch { /* cancelled */ }
@@ -170,37 +174,21 @@ export default function UserProfile() {
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
 
         {/* ═══════════════ COVER ═══════════════ */}
-        <View style={[styles.cover, { height: COVER_H }]}>
+        <View style={[styles.cover, { height: COVER_H, backgroundColor: colors.surfaceHigh }]}>
           {u.cover_picture ? (
             <Image source={{ uri: u.cover_picture }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
           ) : (
-            <LinearGradient
-              colors={[colors.primaryDeep, colors.primary, `${colors.primary}44`]}
-              start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-              style={StyleSheet.absoluteFillObject}
-            />
+            <CoverWatermark />
           )}
-          <LinearGradient
-            colors={["rgba(0,0,0,0.1)", "transparent", "rgba(0,0,0,0.4)"]}
-            style={StyleSheet.absoluteFillObject}
-          />
-          <LinearGradient
-            colors={["transparent", colors.background]}
-            start={{ x: 0, y: 0.7 }} end={{ x: 0, y: 1 }}
-            style={StyleSheet.absoluteFillObject}
-          />
 
           {/* Top bar */}
           <View style={styles.coverTopBar}>
-            <TouchableOpacity onPress={() => router.back()} style={styles.coverBtn}>
-              <Feather name="arrow-left" size={20} color="#fff" />
+            <TouchableOpacity onPress={() => router.back()} style={[styles.coverBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <Feather name="arrow-left" size={18} color={colors.foreground} />
             </TouchableOpacity>
             <View style={styles.coverTopRight}>
-              <TouchableOpacity onPress={handleShare} style={styles.coverBtn}>
-                <Feather name="share-2" size={17} color="#fff" />
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => setMoreOpen(v => !v)} style={styles.coverBtn}>
-                <Feather name="more-horizontal" size={17} color="#fff" />
+              <TouchableOpacity onPress={() => setMoreOpen(v => !v)} style={[styles.coverBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                <Feather name="more-horizontal" size={16} color={colors.foreground} />
               </TouchableOpacity>
             </View>
           </View>
@@ -211,7 +199,11 @@ export default function UserProfile() {
               entering={FadeIn.duration(120)}
               style={[styles.dropdown, { backgroundColor: colors.surface, borderColor: colors.border }]}
             >
-              <TouchableOpacity style={styles.dropdownItem} onPress={() => { setMoreOpen(false); handleReport(); }}>
+              <TouchableOpacity style={styles.dropdownItem} onPress={() => { setMoreOpen(false); handleShare(); }}>
+                <Feather name="share-2" size={14} color={colors.foreground} />
+                <NxText style={[styles.dropdownText, { color: colors.foreground }]}>Share</NxText>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.dropdownItem, { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }]} onPress={() => { setMoreOpen(false); handleReport(); }}>
                 <Feather name="flag" size={14} color={colors.danger} />
                 <NxText style={[styles.dropdownText, { color: colors.danger }]}>Report</NxText>
               </TouchableOpacity>
@@ -237,7 +229,7 @@ export default function UserProfile() {
               <TouchableOpacity
                 activeOpacity={hasStory ? 0.85 : 1}
                 disabled={!hasStory}
-                onPress={() => router.push(`/story/${id}`)}
+                onPress={() => router.push(`/story/${resolvedId}`)}
               >
                 <View style={[styles.avatarRing, { borderColor: colors.background }]}>
                   <Avatar
@@ -342,17 +334,13 @@ export default function UserProfile() {
           {/* ═══════════════ STATS ═══════════════ */}
           {!u.private_locked ? (
             <Animated.View entering={FadeIn.delay(80).duration(400)} style={[styles.statsCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              <StatItem value={u.friend_count ?? 0} label="Bonds" color={colors.primary} />
+              <StatItem value={u.friend_count ?? 0} label="Bonds" color={colors.primary} muted={colors.mutedFg} />
               <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
-              <StatItem value={u.story_count ?? 0} label="Reveries" color="#7a00ff" />
+              <StatItem value={u.story_count ?? 0} label="Reveries" color="#7a00ff" muted={colors.mutedFg} />
             </Animated.View>
           ) : (
             <Animated.View entering={FadeInDown.delay(80).duration(400)}>
               <View style={[styles.privateCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                <LinearGradient
-                  colors={[colors.surface, `${colors.primary}08`]}
-                  style={StyleSheet.absoluteFillObject}
-                />
                 <View style={[styles.privateIcon, { backgroundColor: `${colors.primary}15` }]}>
                   <Feather name="lock" size={22} color={colors.primary} />
                 </View>
@@ -376,7 +364,7 @@ export default function UserProfile() {
               <View style={styles.sectionHeader}>
                 <Feather name="image" size={12} color={colors.mutedFg} />
                 <NxText style={[styles.sectionTitle, { color: colors.mutedFg }]}>RECENT REVERIES</NxText>
-                <TouchableOpacity onPress={() => router.push(`/story/${id}`)} style={{ marginLeft: "auto" }}>
+                <TouchableOpacity onPress={() => router.push(`/story/${resolvedId}`)} style={{ marginLeft: "auto" }}>
                   <NxText style={[styles.viewAll, { color: colors.primary }]}>View all</NxText>
                 </TouchableOpacity>
               </View>
@@ -385,8 +373,8 @@ export default function UserProfile() {
                   {storyImages.map((uri, i) => (
                     <TouchableOpacity
                       key={i}
-                      onPress={() => router.push(`/story/${id}`)}
-                      style={[styles.galleryThumb, { borderColor: colors.border }]}
+                      onPress={() => router.push(`/story/${resolvedId}`)}
+                      style={[styles.galleryThumb, { borderColor: colors.border, backgroundColor: colors.surfaceHigh }]}
                       activeOpacity={0.85}
                     >
                       <Image source={{ uri }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
@@ -406,10 +394,6 @@ export default function UserProfile() {
                   <TouchableOpacity disabled={busy} onPress={() => act("/friends/unfriend")} style={[styles.secondaryBtn, { borderColor: colors.border }]}>
                     <Feather name="user-minus" size={14} color={colors.foreground} />
                     <NxText style={[styles.secondaryText, { color: colors.foreground }]}>Unfriend</NxText>
-                  </TouchableOpacity>
-                  <TouchableOpacity disabled={busy} onPress={handleShare} style={[styles.secondaryBtn, { borderColor: colors.border }]}>
-                    <Feather name="share-2" size={14} color={colors.foreground} />
-                    <NxText style={[styles.secondaryText, { color: colors.foreground }]}>Share</NxText>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -453,11 +437,11 @@ export default function UserProfile() {
 
 /* ── Sub-components ── */
 
-function StatItem({ value, label, color }: { value: any; label: string; color: string }) {
+function StatItem({ value, label, color, muted }: { value: any; label: string; color: string; muted: string }) {
   return (
     <View style={{ flex: 1, alignItems: "center" }}>
       <NxText style={[styles.statValue, { color }]}>{String(value)}</NxText>
-      <NxText style={styles.statLabel}>{label}</NxText>
+      <NxText style={[styles.statLabel, { color: muted }]}>{label}</NxText>
     </View>
   );
 }
@@ -539,12 +523,12 @@ const styles = StyleSheet.create({
   },
   coverTopRight: { flexDirection: "row", gap: 8 },
   coverBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(0,0,0,0.3)",
   },
 
   // Dropdown
@@ -558,10 +542,10 @@ const styles = StyleSheet.create({
     zIndex: 100,
     overflow: "hidden",
     shadowColor: "#000",
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 8,
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
   },
   dropdownItem: {
     flexDirection: "row",
@@ -575,16 +559,11 @@ const styles = StyleSheet.create({
   // Card
   card: {
     marginTop: -40,
-    borderRadius: radii.xl,
+    borderRadius: radii.md,
     borderWidth: 1,
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.lg,
     alignItems: "center",
-    shadowColor: "#000",
-    shadowOpacity: 0.08,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 4,
   },
 
   // Avatar
@@ -703,18 +682,18 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     marginTop: spacing.md,
-    borderRadius: radii.xl,
+    borderRadius: radii.md,
     borderWidth: 1,
     paddingVertical: spacing.lg,
   },
   statValue: { fontFamily: fonts.display, fontSize: 22, letterSpacing: 0.5 },
-  statLabel: { fontFamily: fonts.body, fontSize: 11, color: "#888", marginTop: 3, letterSpacing: 0.6, textTransform: "uppercase" },
+  statLabel: { fontFamily: fonts.body, fontSize: 11, marginTop: 3, letterSpacing: 0.6, textTransform: "uppercase" },
   statDivider: { width: 1, height: 34 },
 
   // Private
   privateCard: {
     marginTop: spacing.md,
-    borderRadius: radii.xl,
+    borderRadius: radii.md,
     borderWidth: 1,
     paddingHorizontal: spacing.lg,
     paddingVertical: 28,
@@ -758,13 +737,12 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     overflow: "hidden",
     borderWidth: 1,
-    backgroundColor: "#111",
   },
 
   // Actions
   actionsCard: {
     marginTop: spacing.xl,
-    borderRadius: radii.xl,
+    borderRadius: radii.md,
     borderWidth: 1,
     padding: 12,
     gap: 8,
@@ -778,11 +756,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 8,
     overflow: "hidden",
-    shadowColor: "#000",
-    shadowOpacity: 0.15,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 4,
   },
   primaryText: { fontFamily: fonts.bodySemi, fontSize: 14 },
   secondaryBtn: {

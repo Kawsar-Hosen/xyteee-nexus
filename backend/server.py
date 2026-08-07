@@ -228,6 +228,21 @@ def make_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:16]}"
 
 
+USER_ID_START = 52972752990
+
+
+async def next_user_id() -> str:
+    """Sequential numeric user id starting at USER_ID_START."""
+    r = await run(lambda: sb.table("users").select("user_id").execute())
+    numeric = [
+        int(row["user_id"])
+        for row in (r.data or [])
+        if row.get("user_id") and str(row["user_id"]).isdigit()
+    ]
+    nxt = max(numeric, default=USER_ID_START - 1) + 1
+    return str(nxt)
+
+
 def hash_password(pwd: str) -> str:
     return hashpw(pwd.encode(), gensalt()).decode()
 
@@ -342,6 +357,7 @@ async def _send_expo_push(to_user: str, kind: str, data: dict):
     title_map = {
         "friend_request": "New friend request",
         "friend_accepted": "Friend request accepted",
+        "friend_rejected": "Friend request declined",
         "message": "New message",
         "voice_call": "📞 Incoming voice call",
         "video_call": "📹 Incoming video call",
@@ -363,6 +379,7 @@ async def _send_expo_push(to_user: str, kind: str, data: dict):
     body_map = {
         "friend_request": f"{from_name} sent you a friend request",
         "friend_accepted": f"{from_name} accepted your friend request",
+        "friend_rejected": f"{from_name} declined your friend request",
         "message": f"{from_name}: {data.get('preview') or 'Sent you a message'}",
         "voice_call": f"{from_name} is calling you…",
         "video_call": f"{from_name} is video calling you…",
@@ -673,6 +690,7 @@ class ChangePwdIn(BaseModel):
 
 class ProfileUpdate(BaseModel):
     display_name: Optional[str] = None
+    username: Optional[str] = None
     bio: Optional[str] = None
     profile_picture: Optional[str] = None
     cover_picture: Optional[str] = None
@@ -839,7 +857,7 @@ async def signup(body: SignUpIn):
     if r2.data:
         raise HTTPException(status_code=400, detail="Username already taken")
 
-    user_id = make_id("usr")
+    user_id = await next_user_id()
     doc = {
         "user_id": user_id,
         "email": email,
@@ -1027,7 +1045,7 @@ async def google_auth(body: GoogleAuthIn):
         username = f"{username_base[:24 - len(suffix)]}{suffix}"
         counter += 1
 
-    user_id = make_id("usr")
+    user_id = await next_user_id()
     doc = {
         "user_id": user_id,
         "email": email,
@@ -1507,6 +1525,13 @@ async def discover_more_users(user=Depends(current_user)):
 
 @api.get("/users/{user_id}")
 async def get_user(user_id: str, user=Depends(current_user)):
+    # Allow share links like /user/<username> to resolve by username too.
+    # Try exact user_id first (covers legacy usr_... ids), then username.
+    direct = await run(lambda: sb.table("users").select("user_id").eq("user_id", user_id).limit(1).execute())
+    if not direct.data:
+        uname_r = await run(lambda: sb.table("users").select("user_id").eq("username", user_id.strip().lower()).execute())
+        if uname_r.data:
+            user_id = uname_r.data[0]["user_id"]
     if user_id != user["user_id"]:
         await ensure_not_blocked(user["user_id"], user_id)
 
@@ -1634,6 +1659,17 @@ async def update_me(body: ProfileUpdate, user=Depends(current_user)):
                 status_code=400,
                 detail="Birthday cannot be in the future",
             )
+
+    if "username" in upd:
+        new_username = upd["username"].strip().lower()
+        if not re.fullmatch(r"[a-z0-9._]+", new_username):
+            raise HTTPException(status_code=400, detail="Username can only contain letters, numbers, dots and underscores")
+        if not (3 <= len(new_username) <= 24):
+            raise HTTPException(status_code=400, detail="Username must be 3-24 characters")
+        dup = await run(lambda: sb.table("users").select("user_id").eq("username", new_username).neq("user_id", user["user_id"]).execute())
+        if dup.data:
+            raise HTTPException(status_code=400, detail="This username is already taken")
+        upd["username"] = new_username
 
     if "birthday_visibility" in upd:
         valid_birthday_visibilities = {"private", "public", "bonds"}
@@ -1792,6 +1828,12 @@ async def friend_accept(body: FriendActionIn, user=Depends(current_user)):
     await run(lambda: sb.table("friend_requests")
         .update({"status": "accepted", "resolved_at": ts(now_utc())})
         .eq("request_id", req["request_id"]).execute())
+    # Remove the pending friend_request notification for the acceptor so the
+    # Accept/Decline actions don't come back on the next reload.
+    await run(lambda: sb.table("notifications").delete()
+        .eq("user_id", user["user_id"])
+        .eq("kind", "friend_request")
+        .contains("data", {"from": body.user_id}).execute())
     fa, fb = sorted([user["user_id"], body.user_id])
     await run(lambda: sb.table("friendships").insert({
         "friendship_id": make_id("frn"), "a": fa, "b": fb, "created_at": ts(now_utc()),
@@ -1807,6 +1849,16 @@ async def friend_reject(body: FriendActionIn, user=Depends(current_user)):
     await run(lambda: sb.table("friend_requests")
         .update({"status": "rejected", "resolved_at": ts(now_utc())})
         .eq("from_user", body.user_id).eq("to_user", user["user_id"]).eq("status", "pending").execute())
+    # Remove the pending friend_request notification for the decliner so the
+    # Accept/Decline actions don't come back on the next reload.
+    await run(lambda: sb.table("notifications").delete()
+        .eq("user_id", user["user_id"])
+        .eq("kind", "friend_request")
+        .contains("data", {"from": body.user_id}).execute())
+    # Notify the requester in realtime that their bond request was declined.
+    await _push_notification(body.user_id, "friend_rejected", {
+        "from": user["user_id"], "from_name": user["display_name"],
+    })
     return {"ok": True}
 
 
@@ -3141,10 +3193,14 @@ async def list_chats(user=Depends(current_user)):
         .eq("deleted_for_everyone", False)
         .execute())
 
-    # Count unread per conversation
+    # Count unread per conversation, and remember which conversations I have
+    # replied to (sent at least one message) — these are never requests.
     unread_map: dict = {cid: 0 for cid in conv_ids}
+    replied_map: set = set()
     for m in (msgs_r.data or []):
         cid = m["conversation_id"]
+        if m["sender_id"] == me:
+            replied_map.add(cid)
         if (
             m["sender_id"] != me
             and me not in (m.get("read_by") or [])
@@ -3171,6 +3227,16 @@ async def list_chats(user=Depends(current_user)):
         c["other_user"] = other_user
         c["unread"] = unread_map.get(c["conversation_id"], 0)
         c["is_bonded"] = other in bonded_ids
+
+        # Message request: a non-bonded user has messaged me and I have NOT
+        # replied yet. It stays a request until I reply. Seeing it does NOT
+        # move it to Conversations. Once I reply, it moves into regular
+        # Conversations permanently — even if we remain non-bonded and they
+        # message again, it will not come back to Requests.
+        c["is_request"] = (
+            not c["is_bonded"]
+            and c["conversation_id"] not in replied_map
+        )
         out.append(c)
 
     return {"chats": out}

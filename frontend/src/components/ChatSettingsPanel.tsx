@@ -152,7 +152,7 @@ export function ChatSettingsPanel({
       : "Offline";
 
   const openProfile = () => {
-    if (other?.user_id) router.push(`/user/${other.user_id}`);
+    if (other?.username || other?.user_id) router.push(`/user/${other?.username || other?.user_id}`);
   };
 
   const openSearch = () => {

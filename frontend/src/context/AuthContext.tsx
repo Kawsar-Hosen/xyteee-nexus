@@ -9,6 +9,7 @@ export type User = {
   username: string;
   display_name: string;
   bio?: string;
+  website?: string;
   profile_picture?: string;
   cover_picture?: string;
   birthday?: string | null;

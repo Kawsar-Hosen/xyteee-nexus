@@ -3,7 +3,6 @@ import { View, StyleSheet, TouchableOpacity, ScrollView, Switch, Platform } from
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
-import { LinearGradient } from "expo-linear-gradient";
 
 import { useTheme } from "@/src/context/ThemeContext";
 import { useAuth } from "@/src/context/AuthContext";
@@ -36,11 +35,6 @@ export default function Settings() {
           onPress={() => router.push("/settings/edit-profile")}
           style={[styles.profileCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
         >
-          <LinearGradient
-            colors={[colors.primary + "18", "transparent"]}
-            start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-            style={StyleSheet.absoluteFillObject}
-          />
           <Avatar uri={user?.profile_picture} name={user?.display_name} size={62} frame={user?.profile_frame} achievement={user?.achievement_level} animation={user?.profile_animation} animationSpeed={user?.profile_animation_speed} animationIntensity={user?.profile_animation_intensity} />
           <View style={{ flex: 1, marginLeft: 14 }}>
             <View style={{ flexDirection: "row", alignItems: "center" }}>
@@ -73,8 +67,8 @@ export default function Settings() {
         <Section label="Appearance">
           <Card colors={colors}>
             <View style={[styles.row, { borderBottomColor: colors.border }]}>
-              <View style={[styles.rowIcon, { backgroundColor: colors.primary + "18" }]}>
-                <Feather name={mode === "dark" ? "moon" : "sun"} size={16} color={colors.primary} />
+              <View style={[styles.rowIcon, { backgroundColor: colors.primary }]}>
+                <Feather name={mode === "dark" ? "moon" : "sun"} size={16} color="#fff" />
               </View>
               <NxText style={{ marginLeft: 12, fontFamily: fonts.bodyMedium, flex: 1 }}>Dark mode</NxText>
               <Switch testID="settings-theme-toggle" value={mode === "dark"} onValueChange={toggle} trackColor={{ true: colors.primary, false: colors.border }} thumbColor={colors.background} />
@@ -86,8 +80,8 @@ export default function Settings() {
         <Section label="Privacy">
           <Card colors={colors}>
             <View style={[styles.row, { borderBottomColor: colors.border }]}>
-              <View style={[styles.rowIcon, { backgroundColor: "#23A55A" + "18" }]}>
-                <Feather name="eye-off" size={16} color="#23A55A" />
+              <View style={[styles.rowIcon, { backgroundColor: "#23A55A" }]}>
+                <Feather name="eye-off" size={16} color="#fff" />
               </View>
               <NxText style={{ marginLeft: 12, fontFamily: fonts.bodyMedium, flex: 1 }}>Private account</NxText>
               <Switch
@@ -128,7 +122,6 @@ function Section({ label, children }: any) {
   return (
     <View style={{ marginBottom: spacing.lg }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 7, marginBottom: 8 }}>
-        <View style={[styles.sectionDot, { backgroundColor: colors.primary }]} />
         <NxText variant="label" style={{ color: colors.mutedFg }}>{label}</NxText>
       </View>
       {children}
@@ -152,8 +145,8 @@ function Row({ icon, label, onPress, tint, testID, colors, last }: any) {
       activeOpacity={0.75}
       style={[styles.row, !last && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border }]}
     >
-      <View style={[styles.rowIcon, { backgroundColor: `${tint || colors.primary}1F` }]}>
-        <Feather name={icon} size={16} color={tint || colors.primary} />
+      <View style={[styles.rowIcon, { backgroundColor: tint || colors.primary }]}>
+        <Feather name={icon} size={16} color="#fff" />
       </View>
       <NxText style={{ marginLeft: 12, fontFamily: fonts.bodyMedium, color: tint && tint === colors.danger ? tint : colors.foreground, fontSize: 14, flex: 1 }}>
         {label}
@@ -184,16 +177,11 @@ const styles = StyleSheet.create({
   profileCard: {
     flexDirection: "row",
     alignItems: "center",
-    borderRadius: radii.xl,
+    borderRadius: radii.md,
     borderWidth: 1,
     padding: spacing.lg,
     marginBottom: spacing.xl,
     overflow: "hidden",
-    shadowColor: "#000",
-    shadowOpacity: 0.1,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 5 },
-    elevation: 4,
   },
   editChip: {
     flexDirection: "row",
@@ -203,7 +191,7 @@ const styles = StyleSheet.create({
     borderRadius: radii.pill,
   },
   card: {
-    borderRadius: radii.xl,
+    borderRadius: radii.md,
     borderWidth: 1,
     paddingHorizontal: spacing.md,
     overflow: "hidden",
@@ -213,6 +201,5 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingVertical: 14,
   },
-  rowIcon: { width: 40, height: 40, borderRadius: 14, alignItems: "center", justifyContent: "center" },
-  sectionDot: { width: 6, height: 6, borderRadius: 3 },
+  rowIcon: { width: 36, height: 36, borderRadius: 10, alignItems: "center", justifyContent: "center" },
 });

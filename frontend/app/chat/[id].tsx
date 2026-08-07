@@ -990,7 +990,7 @@ export default function ChatScreen() {
         <TouchableOpacity testID="chat-back" onPress={() => router.back()} style={[styles.iconBtn, isNarrow && { width: 36, height: 36 }]}>
           <Feather name="chevron-left" size={isNarrow ? 26 : 28} color={colors.foreground} />
         </TouchableOpacity>
-        <TouchableOpacity style={{ flexDirection: "row", alignItems: "center", flex: 1, minWidth: 0 }} onPress={() => other && router.push(`/user/${other.user_id}`)}>
+        <TouchableOpacity style={{ flexDirection: "row", alignItems: "center", flex: 1, minWidth: 0 }} onPress={() => other && router.push(`/user/${other.username || other.user_id}`)}>
           <Avatar
             uri={other?.profile_picture}
             name={other?.display_name}

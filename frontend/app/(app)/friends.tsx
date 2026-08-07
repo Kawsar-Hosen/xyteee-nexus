@@ -159,7 +159,7 @@ export default function Friends() {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           renderItem={({ item }) => (
             <View style={styles.row}>
-              <TouchableOpacity style={{ flexDirection: "row", alignItems: "center", flex: 1 }} onPress={() => router.push(`/user/${item.user_id}`)}>
+              <TouchableOpacity style={{ flexDirection: "row", alignItems: "center", flex: 1 }} onPress={() => router.push(`/user/${item.username || item.user_id}`)}>
                 <Avatar
                   uri={item.profile_picture}
                   name={item.display_name}

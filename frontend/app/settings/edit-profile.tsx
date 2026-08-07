@@ -4,20 +4,21 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
 import { Feather } from "@expo/vector-icons";
-import { LinearGradient } from "expo-linear-gradient";
 
 import { useTheme } from "@/src/context/ThemeContext";
 import { useAuth } from "@/src/context/AuthContext";
 import { uploadFile } from "@/src/api/upload";
 import { NxText } from "@/src/components/NxText";
 import { Avatar } from "@/src/components/Avatar";
+import { CoverWatermark } from "@/src/components/CoverWatermark";
 import { fonts, radii, spacing } from "@/src/theme";
 
 export default function EditProfile() {
   const { colors } = useTheme();
-  const { user, updateUser } = useAuth();
+  const { user, token, updateUser } = useAuth();
   const router = useRouter();
   const [display, setDisplay] = useState(user?.display_name || "");
+  const [username, setUsername] = useState(user?.username || "");
   const [bio, setBio] = useState(user?.bio || "");
   const [avatar, setAvatar] = useState(user?.profile_picture || "");
   const [cover, setCover] = useState(user?.cover_picture || "");
@@ -69,7 +70,7 @@ export default function EditProfile() {
     const asset = r.assets[0];
     setBusy(true);
     try {
-      const url = await uploadFile(asset.uri, "profiles", user?.user_id || "", asset.fileName || undefined);
+      const url = await uploadFile(asset.uri, "profiles", token || "", asset.fileName || undefined);
       if (target === "avatar") setAvatar(url);
       else setCover(url);
     } finally { setBusy(false); }
@@ -80,6 +81,7 @@ export default function EditProfile() {
     try {
       await updateUser({
         display_name: display,
+        username,
         bio,
         profile_picture: avatar,
         cover_picture: cover,
@@ -108,19 +110,13 @@ export default function EditProfile() {
       <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
         <TouchableOpacity testID="edit-cover" onPress={() => pickImage("cover")} activeOpacity={0.9} style={styles.cover}>
           {cover ? (
-            <>
-              <Image source={{ uri: cover }} style={StyleSheet.absoluteFillObject} />
-              <LinearGradient
-                colors={["transparent", "rgba(0,0,0,0.45)"]}
-                style={StyleSheet.absoluteFillObject}
-              />
-            </>
+            <Image source={{ uri: cover }} style={StyleSheet.absoluteFillObject} />
           ) : (
-            <LinearGradient colors={[colors.primary, colors.primaryDeep]} style={StyleSheet.absoluteFillObject} />
+            <CoverWatermark />
           )}
-          <View style={styles.coverOverlay}>
-            <Feather name="camera" size={18} color="#fff" />
-            <NxText style={{ color: "#fff", marginLeft: 8, fontFamily: fonts.bodyMedium }}>Change cover</NxText>
+          <View style={[styles.coverOverlay, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Feather name="camera" size={18} color={colors.foreground} />
+            <NxText style={{ color: colors.foreground, marginLeft: 8, fontFamily: fonts.bodyMedium }}>Change cover</NxText>
           </View>
         </TouchableOpacity>
         <View style={{ paddingHorizontal: spacing.lg }}>
@@ -144,6 +140,22 @@ export default function EditProfile() {
             style={[styles.input, { color: colors.foreground, backgroundColor: colors.surface, borderColor: colors.border }]}
             placeholderTextColor={colors.mutedFg}
           />
+
+          <View style={{ height: spacing.md }} />
+          <NxText variant="label">Username</NxText>
+          <TextInput
+            testID="edit-username-input"
+            value={username}
+            onChangeText={setUsername}
+            autoCapitalize="none"
+            autoCorrect={false}
+            style={[styles.input, { color: colors.foreground, backgroundColor: colors.surface, borderColor: colors.border }]}
+            placeholder="username"
+            placeholderTextColor={colors.mutedFg}
+          />
+          <NxText style={{ color: colors.mutedFg, fontFamily: fonts.body, fontSize: 11, marginTop: 4 }}>
+            @ handle — letters, numbers, dots and underscores
+          </NxText>
 
           <View style={{ height: spacing.md }} />
           <NxText variant="label">Bio</NxText>
@@ -303,7 +315,7 @@ const styles = StyleSheet.create({
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: spacing.md, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth },
   iconBtn: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
   cover: { height: 190, position: "relative" },
-  coverOverlay: { position: "absolute", bottom: 12, right: 16, flexDirection: "row", alignItems: "center", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 20, backgroundColor: "rgba(0,0,0,0.4)" },
+  coverOverlay: { position: "absolute", bottom: 12, right: 16, flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, borderWidth: 1 },
   avatarCam: { position: "absolute", bottom: 4, right: 4, width: 30, height: 30, borderRadius: 15, alignItems: "center", justifyContent: "center" },
   input: { borderWidth: 1, borderRadius: radii.lg, padding: 15, fontFamily: "Outfit", fontSize: 15, marginTop: 6 },
   statusRow: {

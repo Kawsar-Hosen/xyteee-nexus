@@ -11,6 +11,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.xyteee.nexus",
+      "associatedDomains": ["applinks:xyteee.com"],
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "Choose photos to share and post as stories",
         "NSCameraUsageDescription": "Take photos for your profile and stories",
@@ -28,6 +29,20 @@
         "backgroundColor": "#070709"
       },
       "edgeToEdgeEnabled": true,
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "xyteee.com",
+              "pathPrefix": "/user"
+            }
+          ],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
+      ],
       "permissions": [
         "android.permission.READ_MEDIA_IMAGES",
         "android.permission.READ_EXTERNAL_STORAGE",

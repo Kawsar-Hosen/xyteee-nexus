@@ -470,7 +470,7 @@ export default function StoryViewer() {
 
         {/* ── Header ─────────────────────────────────────────────── */}
         <View style={styles.top}>
-          <TouchableOpacity onPress={() => router.push(`/user/${author?.user_id}`)} style={{ flexDirection: "row", alignItems: "center", flex: 1 }}>
+          <TouchableOpacity onPress={() => router.push(`/user/${author?.username || author?.user_id}`)} style={{ flexDirection: "row", alignItems: "center", flex: 1 }}>
             <Avatar uri={author?.profile_picture} name={author?.display_name} size={40} frame={author?.profile_frame} achievement={author?.achievement_level} animation={author?.profile_animation} animationSpeed={author?.profile_animation_speed} animationIntensity={author?.profile_animation_intensity} />
             <View style={{ marginLeft: 10, flex: 1 }}>
               <View style={{ flexDirection: "row", alignItems: "center" }}>
