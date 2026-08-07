@@ -3121,6 +3121,11 @@ async def react_circle_message(
 # ── Chats ──────────────────────────────────────────────────────────────────────
 def _conv_id_for(a: str, b: str) -> str:
     x, y = sorted([a, b])
+    return f"cnv_{x}_{y}"
+
+
+def _legacy_conv_id_for(a: str, b: str) -> str:
+    x, y = sorted([a, b])
     return f"cnv_{x[:8]}_{y[:8]}"
 
 
@@ -3137,6 +3142,24 @@ async def open_chat(body: FriendActionIn, user=Depends(current_user)):
     if cr.data:
         conv = cr.data[0]
     else:
+        # Back-compat: older conversations used truncated user IDs (cnv_{x[:8]}_{y[:8]}).
+        # If a legacy conversation exists for this pair, migrate it to the new
+        # collision-free id instead of creating a duplicate.
+        legacy_id = _legacy_conv_id_for(user["user_id"], other)
+        if legacy_id != conv_id:
+            lr = await run(lambda: sb.table("conversations").select("*").eq("conversation_id", legacy_id).execute())
+            if lr.data:
+                legacy = lr.data[0]
+                if sorted(legacy.get("participants") or []) == sorted([user["user_id"], other]):
+                    await run(lambda: sb.table("conversations").insert(
+                        {**legacy, "conversation_id": conv_id,
+                         "participants": sorted([user["user_id"], other])}).execute())
+                    await run(lambda: sb.table("messages").update({"conversation_id": conv_id})
+                              .eq("conversation_id", legacy_id).execute())
+                    await run(lambda: sb.table("conversations").delete().eq("conversation_id", legacy_id).execute())
+                    conv = {**legacy, "conversation_id": conv_id,
+                            "participants": sorted([user["user_id"], other])}
+                    return {"conversation": conv}
         conv = {
             "conversation_id": conv_id,
             "participants": sorted([user["user_id"], other]),
