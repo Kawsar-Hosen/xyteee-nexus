@@ -34,6 +34,10 @@ export type WsEvent =
   | { type: "call_answer"; conversation_id: string; user_id: string; sdp: any }
   | { type: "call_ice"; conversation_id: string; user_id: string; candidate: any }
   | { type: "call_end"; conversation_id: string; user_id: string }
+  | { type: "video_call_offer"; conversation_id: string; user_id: string; sdp: any }
+  | { type: "video_call_answer"; conversation_id: string; user_id: string; sdp: any }
+  | { type: "video_call_ice"; conversation_id: string; user_id: string; candidate: any }
+  | { type: "video_call_end"; conversation_id: string; user_id: string }
   | {
       type: "presence";
       user_id: string;

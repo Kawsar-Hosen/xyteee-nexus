@@ -22,21 +22,18 @@ import Animated, {
   withSpring,
   withSequence,
   withTiming,
-  withDelay,
   withRepeat,
   ZoomIn,
-  ZoomOut,
-  FadeIn,
   FadeInUp,
 } from "react-native-reanimated";
 import { Swipeable } from "react-native-gesture-handler";
 import { VideoView as ExpoVideoView, useVideoPlayer } from "expo-video";
+import { Image as ExpoImage } from "expo-image";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import * as Haptics from "expo-haptics";
-import * as FileSystem from "expo-file-system/legacy";
 import dayjs from "dayjs";
 import * as Clipboard from "expo-clipboard";
 import { EmojiKeyboard } from "rn-emoji-keyboard";
@@ -57,9 +54,7 @@ import { LinkPreview } from "@/src/components/LinkPreview";
 import { LiveLocationCard } from "@/src/components/LiveLocationCard";
 import { startLiveLocation, stopLiveLocation } from "@/src/utils/liveLocation";
 import { useVoiceRecorder } from "@/src/hooks/useVoiceRecorder";
-import { usePrivateVoiceCall, formatCallDuration } from "@/src/hooks/usePrivateVoiceCall";
-import { usePrivateVideoCall } from "@/src/hooks/usePrivateVideoCall";
-import { VideoView } from "@/src/components/VideoView";
+import { useCallManager } from "@/src/context/CallContext";
 import { MediaPicker, type MediaTab } from "@/src/components/MediaPicker";
 import { klipyMedia, klipyStickerMedia, type KlipyGif } from "@/src/api/klipy";
 import { fonts, radii, spacing } from "@/src/theme";
@@ -98,6 +93,8 @@ const chatCache: Record<string, {
 }> = {};
 
 function replyPreviewLabel(m: Msg): string {
+  if (m.kind === "call_voice") return "📞 Voice call";
+  if (m.kind === "call_video") return "📹 Video call";
   if (m.kind === "voice") return "🎙 Voice message";
   if (m.kind === "image") return "📷 Photo";
   if (m.kind === "video") return "🎥 Video";
@@ -191,42 +188,11 @@ export default function ChatScreen() {
 
   const { state: recState, elapsed: recElapsed, start: recStart, stop: recStop, cancel: recCancel } = useVoiceRecorder();
 
+  const callManager = useCallManager();
   const {
-    callState,
-    muted,
-    speakerOn,
-    callDuration,
+    call: activeCall,
     startCall,
-    acceptCall,
-    endCall,
-    toggleMute,
-    toggleSpeaker,
-  } = usePrivateVoiceCall({
-    conversationId: conversation_id,
-    token,
-    subscribe,
-    send,
-  });
-
-  const {
-    callState: videoCallState,
-    muted: videoMuted,
-    cameraOff,
-    localStream,
-    remoteStream,
-    callDuration: videoCallDuration,
-    startCall: startVideoCall,
-    acceptCall: acceptVideoCall,
-    endCall: endVideoCall,
-    toggleMute: toggleVideoMute,
-    toggleCamera,
-    switchCamera,
-  } = usePrivateVideoCall({
-    conversationId: conversation_id,
-    token,
-    subscribe,
-    send,
-  });
+  } = callManager;
 
   const { settings: chatSettings } = useChatSettings(conversation_id);
 
@@ -301,7 +267,11 @@ export default function ChatScreen() {
             conversation_id,
             message_id: e.message.message_id,
           });
-          if (!chatSettings.muted && chatSettings.soundEnabled) {
+          if (
+            !e.message.kind?.startsWith("call_") &&
+            !chatSettings.muted &&
+            chatSettings.soundEnabled
+          ) {
             playReceiveSound();
           }
         }
@@ -554,7 +524,7 @@ export default function ChatScreen() {
 
     setSending(true);
     try {
-      const url = await uploadFile(asset.uri, "chat", token!, asset.fileName || undefined);
+      const url = await uploadFile(asset.uri, "chat", token!, asset.fileName || undefined, asset.mimeType);
       // Store original dimensions so the bubble can keep the real aspect ratio.
       const dims =
         asset.width && asset.height
@@ -719,7 +689,7 @@ export default function ChatScreen() {
     playSendSound();
     setSending(true);
     try {
-      const url = await uploadFile(result.uri, "voice", token!, `voice_${Date.now()}.m4a`);
+      const url = await uploadFile(result.uri, "voice", token!, `voice_${Date.now()}.m4a`, "audio/m4a");
       const sent = await api<Msg>("/chats/message", {
         method: "POST",
         body: {
@@ -893,221 +863,8 @@ export default function ChatScreen() {
   const isRecording = recState === "recording";
   const showMic = !text.trim() && !editing && !isRecording;
 
-  const callStatusText =
-    callState === "incoming"
-      ? "Incoming voice call"
-      : callState === "calling"
-        ? "Calling…"
-        : callState === "connecting"
-          ? "Connecting…"
-          : callState === "active"
-            ? formatCallDuration(callDuration)
-            : "";
-
   return (
     <SafeAreaView edges={["top"]} style={{ flex: 1, backgroundColor: colors.background }}>
-      <Modal
-        visible={callState !== "idle"}
-        transparent
-        animationType="fade"
-        onRequestClose={endCall}
-      >
-        <View style={styles.callOverlay}>
-          <View
-            style={[
-              styles.callCard,
-              {
-                backgroundColor: colors.surface,
-                borderColor: colors.border,
-                minHeight: isShort ? 330 : 390,
-                paddingVertical: isShort ? 24 : 40,
-              },
-            ]}
-          >
-            <Avatar
-              uri={other?.profile_picture}
-              name={other?.display_name}
-              size={88}
-              frame={other?.profile_frame}
-              achievement={other?.achievement_level}
-              animation={other?.profile_animation}
-              animationSpeed={other?.profile_animation_speed}
-              animationIntensity={other?.profile_animation_intensity}
-              online={false}
-            />
-
-            <NxText
-              variant="title"
-              numberOfLines={1}
-              style={styles.callName}
-            >
-              {other?.display_name || "Nexus User"}
-            </NxText>
-
-            <NxText
-              variant="bodySm"
-              style={{ marginTop: 6, color: colors.mutedFg }}
-            >
-              {callStatusText}
-            </NxText>
-
-            <View style={styles.callActions}>
-              {callState === "incoming" ? (
-                <>
-                  <TouchableOpacity
-                    testID="call-decline"
-                    onPress={endCall}
-                    style={[styles.callActionButton, styles.callEndButton]}
-                  >
-                    <Feather name="phone-off" size={25} color="#FFFFFF" />
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    testID="call-accept"
-                    onPress={acceptCall}
-                    style={[styles.callActionButton, styles.callAcceptButton]}
-                  >
-                    <Feather name="phone" size={25} color="#FFFFFF" />
-                  </TouchableOpacity>
-                </>
-              ) : (
-                <>
-                  <TouchableOpacity
-                    testID="call-mute"
-                    onPress={toggleMute}
-                    style={[
-                      styles.callActionButton,
-                      {
-                        backgroundColor: muted
-                          ? colors.primary
-                          : colors.background,
-                        borderColor: colors.border,
-                        borderWidth: 1,
-                      },
-                    ]}
-                  >
-                    <Feather
-                      name={muted ? "mic-off" : "mic"}
-                      size={24}
-                      color={muted ? colors.onPrimary : colors.foreground}
-                    />
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    testID="call-speaker"
-                    onPress={toggleSpeaker}
-                    style={[
-                      styles.callActionButton,
-                      {
-                        backgroundColor: speakerOn
-                          ? colors.primary
-                          : colors.background,
-                        borderColor: colors.border,
-                        borderWidth: 1,
-                      },
-                    ]}
-                  >
-                    <Feather
-                      name="volume-2"
-                      size={24}
-                      color={speakerOn ? colors.onPrimary : colors.foreground}
-                    />
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    testID="call-end"
-                    onPress={endCall}
-                    style={[styles.callActionButton, styles.callEndButton]}
-                  >
-                    <Feather name="phone-off" size={25} color="#FFFFFF" />
-                  </TouchableOpacity>
-                </>
-              )}
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      {/* ── Video Call Overlay ──────────────────────────────────────── */}
-      <Modal
-        visible={videoCallState !== "idle"}
-        transparent={false}
-        animationType="slide"
-        onRequestClose={endVideoCall}
-      >
-        <View style={styles.videoCallContainer}>
-          {/* Remote video — full screen */}
-          {remoteStream ? (
-            <VideoView stream={remoteStream} style={styles.remoteVideo} objectFit="cover" zOrder={0} />
-          ) : (
-            <View style={[styles.remoteVideo, { backgroundColor: "#111", alignItems: "center", justifyContent: "center" }]}>
-              <Avatar uri={other?.profile_picture} name={other?.display_name} size={96} online={false} />
-              <NxText variant="title" style={{ color: "#fff", marginTop: 16 }}>
-                {videoCallState === "calling" ? "Calling…" : videoCallState === "incoming" ? "Incoming video call" : "Connecting…"}
-              </NxText>
-            </View>
-          )}
-
-          {/* Call duration — shown top-centre when active */}
-          {videoCallState === "active" && (
-            <View style={styles.videoCallTimer}>
-              <NxText style={{ color: "#fff", fontSize: 15, fontFamily: fonts.bodySemi, letterSpacing: 1 }}>
-                {formatCallDuration(videoCallDuration)}
-              </NxText>
-            </View>
-          )}
-
-          {/* Local video — picture-in-picture */}
-          {localStream && (
-            <VideoView
-              stream={localStream}
-              style={styles.localVideo}
-              objectFit="cover"
-              zOrder={1}
-              mirror
-            />
-          )}
-
-          {/* Controls */}
-          <View style={[styles.videoCallControls, isNarrow && { gap: 12, paddingHorizontal: 12 }]}>
-            {videoCallState === "incoming" ? (
-              <>
-                <TouchableOpacity onPress={endVideoCall} style={[styles.videoCallBtn, isNarrow && styles.videoCallBtnSm, { backgroundColor: "#E5484D" }]}>
-                  <Feather name="phone-off" size={isNarrow ? 24 : 26} color="#fff" />
-                </TouchableOpacity>
-                <TouchableOpacity onPress={acceptVideoCall} style={[styles.videoCallBtn, isNarrow && styles.videoCallBtnSm, { backgroundColor: "#2DBE72" }]}>
-                  <Feather name="video" size={isNarrow ? 24 : 26} color="#fff" />
-                </TouchableOpacity>
-              </>
-            ) : (
-              <>
-                <TouchableOpacity
-                  onPress={toggleVideoMute}
-                  style={[styles.videoCallBtn, isNarrow && styles.videoCallBtnSm, { backgroundColor: videoMuted ? "#fff" : "rgba(255,255,255,0.2)" }]}
-                >
-                  <Feather name={videoMuted ? "mic-off" : "mic"} size={isNarrow ? 22 : 24} color={videoMuted ? "#000" : "#fff"} />
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  onPress={toggleCamera}
-                  style={[styles.videoCallBtn, isNarrow && styles.videoCallBtnSm, { backgroundColor: cameraOff ? "#fff" : "rgba(255,255,255,0.2)" }]}
-                >
-                  <Feather name={cameraOff ? "video-off" : "video"} size={isNarrow ? 22 : 24} color={cameraOff ? "#000" : "#fff"} />
-                </TouchableOpacity>
-
-                <TouchableOpacity onPress={endVideoCall} style={[styles.videoCallBtn, isNarrow && styles.videoCallBtnSm, { backgroundColor: "#E5484D" }]}>
-                  <Feather name="phone-off" size={isNarrow ? 24 : 26} color="#fff" />
-                </TouchableOpacity>
-
-                <TouchableOpacity onPress={switchCamera} style={[styles.videoCallBtn, isNarrow && styles.videoCallBtnSm, { backgroundColor: "rgba(255,255,255,0.2)" }]}>
-                  <Feather name="refresh-cw" size={isNarrow ? 20 : 22} color="#fff" />
-                </TouchableOpacity>
-              </>
-            )}
-          </View>
-        </View>
-      </Modal>
-
       {/* ── Header ──────────────────────────────────────────────────── */}
       <View style={[styles.header, { borderBottomColor: colors.border, backgroundColor: colors.glass, paddingHorizontal: isNarrow ? 4 : 8 }]}>
         <TouchableOpacity testID="chat-back" onPress={() => router.back()} style={[styles.iconBtn, isNarrow && { width: 36, height: 36 }]}>
@@ -1148,8 +905,8 @@ export default function ChatScreen() {
         <View style={{ flexDirection: "row", alignItems: "center" }}>
           <TouchableOpacity
             testID="chat-voice-call"
-            onPress={startCall}
-            disabled={callState !== "idle"}
+            onPress={() => startCall("voice", conversation_id, other)}
+            disabled={!!activeCall}
             style={[styles.iconBtn, isNarrow && { width: 32, height: 36 }]}
           >
             <Feather name="phone" size={isNarrow ? 18 : 20} color={colors.foreground} />
@@ -1157,8 +914,8 @@ export default function ChatScreen() {
 
           <TouchableOpacity
             testID="chat-video-call"
-            onPress={startVideoCall}
-            disabled={videoCallState !== "idle"}
+            onPress={() => startCall("video", conversation_id, other)}
+            disabled={!!activeCall}
             style={[styles.iconBtn, isNarrow && { width: 32, height: 36 }]}
           >
             <Feather name="video" size={isNarrow ? 18 : 20} color={colors.foreground} />
@@ -1216,6 +973,10 @@ export default function ChatScreen() {
               sentFg={sentThemeFg}
               showReadReceipts={chatSettings.readReceipts}
               onStopLive={(mid) => stopLiveSharing(mid)}
+              onCallAgain={() => {
+                if (item.kind === "call_video") startCall("video", conversation_id, other);
+                else startCall("voice", conversation_id, other);
+              }}
             />
           )}
           onContentSizeChange={() => {
@@ -1249,7 +1010,7 @@ export default function ChatScreen() {
 
       {/* ── Input bar ────────────────────────────────────────────────── */}
       <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        behavior="padding"
         keyboardVerticalOffset={0}
       >
         {replyTo ? (
@@ -1647,10 +1408,10 @@ export default function ChatScreen() {
               {viewerMsg?.kind === "video" && viewerMsg.media ? (
                 <ViewerVideo uri={viewerMsg.media} />
               ) : viewerMsg?.media ? (
-                <Image
+                <ExpoImage
                   source={{ uri: viewerMsg.media }}
                   style={styles.viewerImage}
-                  resizeMode="contain"
+                  contentFit="contain"
                 />
               ) : null}
             </View>
@@ -1822,6 +1583,7 @@ function MessageBubble({
   sentFg,
   showReadReceipts = true,
   onStopLive,
+  onCallAgain,
 }: {
   m: Msg;
   isMe: boolean;
@@ -1836,6 +1598,7 @@ function MessageBubble({
   sentFg?: string;
   showReadReceipts?: boolean;
   onStopLive: (messageId: string) => void;
+  onCallAgain?: () => void;
 }) {
   const { colors } = useTheme();
   const { token } = useAuth();
@@ -1852,6 +1615,22 @@ function MessageBubble({
   const isMedia = isGif || isSticker;
   const isLocation = m.kind === "location";
   const isLiveLocation = m.kind === "live_location";
+  const isCall = m.kind === "call_voice" || m.kind === "call_video";
+
+  const callMeta = useMemo(() => {
+    if (!isCall || !m.media) return null;
+    let p: any = m.media;
+    if (typeof p === "string") {
+      try {
+        p = JSON.parse(p);
+      } catch {
+        return null;
+      }
+    }
+    if (p && p.type === "call")
+      return p as { call_type?: string; status?: string; duration_sec?: number };
+    return null;
+  }, [isCall, m.media]);
 
   const mediaDims = useMemo(() => {
     if ((!isImage && !isVideo) || !m.content) return null;
@@ -2052,7 +1831,7 @@ function MessageBubble({
             </View>
           )}
           onSwipeableOpen={(direction) => {
-            if (direction === "left") {
+            if (direction === "left" && !isCall) {
               swipeableRef.current?.close();
               onReply?.();
             }
@@ -2064,6 +1843,7 @@ function MessageBubble({
         >
         <TouchableOpacity
           onLongPress={() => {
+            if (isCall) return;
             try {
               if (Platform.OS !== "web")
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
@@ -2071,15 +1851,81 @@ function MessageBubble({
             onLongPress();
           }}
           onPress={() => {
-            if (isImage || isVideo) onOpenMedia?.();
+            if (isCall) onCallAgain?.();
+            else if (isImage || isVideo) onOpenMedia?.();
             else if ((isLocation || isLiveLocation) && (loc || liveData)) openMapLink();
             else if (linkUrl) openLink(linkUrl);
           }}
           activeOpacity={0.82}
           testID={`msg-${m.message_id}`}
         >
-          {/* ── Voice bubble ── */}
-          {isVoice ? (
+          {/* ── Call-status card ── */}
+          {isCall ? (
+            <View
+              style={[
+                {
+                  backgroundColor: bubbleBg,
+                  borderRadius: 16,
+                  paddingVertical: 13,
+                  paddingHorizontal: 14,
+                  minWidth: 216,
+                  maxWidth: bubbleMaxWidth,
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 12,
+                  ...(Platform.OS === "web"
+                    ? { boxShadow: "0px 2px 10px rgba(0,0,0,0.14)" } as any
+                    : {
+                        shadowColor: "#000",
+                        shadowOpacity: 0.12,
+                        shadowRadius: 8,
+                        shadowOffset: { width: 0, height: 2 },
+                        elevation: 2,
+                      }),
+                  ...(highlighted ? { borderWidth: 1.5, borderColor: colors.primary } : {}),
+                },
+              ]}
+            >
+              <View
+                style={{
+                  width: 42,
+                  height: 42,
+                  borderRadius: 21,
+                  backgroundColor: colors.primary + "22",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <Feather
+                  name={callMeta?.call_type === "video" ? "video" : "phone"}
+                  size={19}
+                  color={colors.primary}
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <NxText
+                  variant="bodySm"
+                  style={{ fontFamily: fonts.bodySemi, color: bubbleFg }}
+                >
+                  {m.content}
+                </NxText>
+                {callMeta?.status === "canceled" ? (
+                  <NxText
+                    variant="caption"
+                    style={{ color: colors.primary, marginTop: 3, fontFamily: fonts.bodySemi }}
+                  >
+                    Tap to call again
+                  </NxText>
+                ) : null}
+                <View style={{ marginTop: 2 }}>
+                  <MetaRow />
+                </View>
+              </View>
+              {callMeta?.status === "canceled" ? (
+                <Feather name="phone-call" size={18} color={colors.primary} />
+              ) : null}
+            </View>
+          ) : isVoice ? (
             <View
               style={[
                 styles.bubble,
@@ -2174,9 +2020,9 @@ function MessageBubble({
               ) : isVideo ? (
                 <BubbleVideo uri={m.media!} dims={photoDims} />
               ) : isGif ? (
-                <Image
+                <ExpoImage
                   source={{ uri: m.media! }}
-                  resizeMode="contain"
+                  contentFit="contain"
                   style={{
                     width: gifDims.width,
                     height: gifDims.height,
@@ -2184,9 +2030,9 @@ function MessageBubble({
                   }}
                 />
               ) : isSticker ? (
-                <Image
+                <ExpoImage
                   source={{ uri: m.media! }}
-                  resizeMode="contain"
+                  contentFit="contain"
                   style={{ width: stickerDims.width, height: stickerDims.height }}
                 />
               ) : isLocation && loc ? (
@@ -2561,49 +2407,6 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
-  callOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.82)",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 28,
-  },
-  callCard: {
-    width: "100%",
-    maxWidth: 380,
-    minHeight: 390,
-    borderRadius: 32,
-    borderWidth: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 28,
-    paddingVertical: 40,
-  },
-  callName: {
-    marginTop: 20,
-    maxWidth: "90%",
-    textAlign: "center",
-  },
-  callActions: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 28,
-    marginTop: 52,
-  },
-  callActionButton: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  callEndButton: {
-    backgroundColor: "#E5484D",
-  },
-  callAcceptButton: {
-    backgroundColor: "#2DBE72",
-  },
   modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "flex-end" },
   liveSheet: { padding: spacing.lg, borderTopLeftRadius: 24, borderTopRightRadius: 24, borderWidth: 1 },
   liveSheetHeader: { flexDirection: "row", alignItems: "center", paddingBottom: spacing.xs },
@@ -2654,57 +2457,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     paddingLeft: 10,
-  },
-  videoCallContainer: {
-    flex: 1,
-    backgroundColor: "#000",
-  },
-  remoteVideo: {
-    flex: 1,
-    width: "100%",
-  },
-  localVideo: {
-    position: "absolute",
-    top: 52,
-    right: 16,
-    width: 100,
-    height: 150,
-    borderRadius: 12,
-    overflow: "hidden",
-    zIndex: 10,
-    borderWidth: 2,
-    borderColor: "rgba(255,255,255,0.4)",
-  },
-  videoCallControls: {
-    position: "absolute",
-    bottom: 48,
-    left: 0,
-    right: 0,
-    flexDirection: "row",
-    justifyContent: "center",
-    alignItems: "center",
-    gap: 20,
-    paddingHorizontal: 24,
-  },
-  videoCallBtn: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  videoCallBtnSm: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
-  },
-  videoCallTimer: {
-    position: "absolute",
-    top: 52,
-    left: 0,
-    right: 0,
-    alignItems: "center",
-    zIndex: 20,
   },
   bubblePlay: {
     width: 46,

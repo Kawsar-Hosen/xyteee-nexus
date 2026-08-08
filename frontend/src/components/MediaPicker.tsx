@@ -4,7 +4,6 @@ import {
   Modal,
   TextInput,
   FlatList,
-  Image,
   Pressable,
   ActivityIndicator,
   StyleSheet,
@@ -13,6 +12,7 @@ import {
   Platform,
   useWindowDimensions,
 } from "react-native";
+import { Image as ExpoImage } from "expo-image";
 import { Feather } from "@expo/vector-icons";
 import Animated, { FadeInUp } from "react-native-reanimated";
 
@@ -186,7 +186,7 @@ export function MediaPicker({ visible, onClose, onSelect }: Props) {
         ]}
       >
         {preview ? (
-          <Image source={{ uri: preview.url }} style={styles.cellImg} resizeMode="cover" />
+          <ExpoImage source={{ uri: preview.url }} style={styles.cellImg} contentFit="cover" />
         ) : null}
       </Pressable>
     );

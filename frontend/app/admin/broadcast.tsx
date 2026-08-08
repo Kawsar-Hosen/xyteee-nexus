@@ -19,10 +19,13 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
+import { Image as ExpoImage } from "expo-image";
+import * as ImagePicker from "expo-image-picker";
 
 import { useTheme } from "@/src/context/ThemeContext";
 import { useAuth } from "@/src/context/AuthContext";
 import { api } from "@/src/api/client";
+import { uploadFile } from "@/src/api/upload";
 import { NxText } from "@/src/components/NxText";
 import { fonts, radii, spacing } from "@/src/theme";
 
@@ -33,10 +36,34 @@ export default function AdminBroadcast() {
 
   const [title, setTitle] = useState("");
   const [message, setMessage] = useState("");
+  const [image, setImage] = useState<string | null>(null);
+  const [pickingImg, setPickingImg] = useState(false);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<string | null>(null);
 
   const canSend = title.trim().length > 0 && message.trim().length > 0 && !busy;
+
+  const pickImage = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== "granted") return;
+    const r = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.7,
+      allowsEditing: true,
+      aspect: [16, 9],
+    });
+    if (r.canceled || !r.assets?.[0] || !token) return;
+    const asset = r.assets[0];
+    setPickingImg(true);
+    try {
+      const url = await uploadFile(asset.uri, "broadcasts", token, asset.fileName || undefined, asset.mimeType);
+      setImage(url);
+    } catch (e: any) {
+      Alert.alert("Upload failed", e?.message || "Could not upload the image");
+    } finally {
+      setPickingImg(false);
+    }
+  };
 
   const send = async () => {
     if (!canSend || !token) return;
@@ -48,7 +75,11 @@ export default function AdminBroadcast() {
         {
           method: "POST",
           token,
-          body: { title: title.trim(), message: message.trim() },
+          body: {
+            title: title.trim(),
+            message: message.trim(),
+            ...(image ? { image } : {}),
+          },
         }
       );
       setResult(
@@ -56,6 +87,7 @@ export default function AdminBroadcast() {
       );
       setTitle("");
       setMessage("");
+      setImage(null);
     } catch (e: any) {
       Alert.alert("Broadcast failed", e?.message || e?.detail || "Please try again");
     } finally {
@@ -134,8 +166,57 @@ export default function AdminBroadcast() {
               ]}
             />
 
+            <View style={[styles.fieldHead, { marginTop: spacing.md }]}>
+              <Feather name="image" size={15} color={colors.primary} />
+              <NxText variant="titleSm">Banner image</NxText>
+              <NxText style={{ color: colors.mutedFg, fontSize: 12, marginLeft: 6 }}>
+                (optional — shows in the push banner & in-app card)
+              </NxText>
+            </View>
+            {image ? (
+              <View
+                style={[
+                  styles.imagePreview,
+                  { backgroundColor: colors.surface, borderColor: colors.border },
+                ]}
+              >
+                <ExpoImage
+                  source={{ uri: image }}
+                  style={styles.imagePreviewMedia}
+                  contentFit="cover"
+                />
+                <TouchableOpacity
+                  onPress={() => setImage(null)}
+                  style={styles.imageRemove}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Feather name="x" size={16} color="#fff" />
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity
+                onPress={pickImage}
+                disabled={pickingImg}
+                activeOpacity={0.8}
+                style={[
+                  styles.imagePicker,
+                  { backgroundColor: colors.surface, borderColor: colors.border },
+                ]}
+              >
+                {pickingImg ? (
+                  <ActivityIndicator size="small" color={colors.primary} />
+                ) : (
+                  <>
+                    <Feather name="image" size={20} color={colors.primary} />
+                    <NxText style={{ color: colors.primary, marginLeft: 10, fontFamily: fonts.bodyMedium }}>
+                      Add banner image
+                    </NxText>
+                  </>
+                )}
+              </TouchableOpacity>
+            )}
+
             <TouchableOpacity
-              testID="admin-broadcast-send"
               disabled={!canSend}
               onPress={send}
               activeOpacity={0.82}
@@ -246,6 +327,35 @@ const styles = StyleSheet.create({
   inputMultiline: {
     minHeight: 120,
     textAlignVertical: "top",
+  },
+  imagePicker: {
+    minHeight: 96,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    borderStyle: "dashed",
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+  },
+  imagePreview: {
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    overflow: "hidden",
+  },
+  imagePreviewMedia: {
+    width: "100%",
+    aspectRatio: 16 / 9,
+  },
+  imageRemove: {
+    position: "absolute",
+    top: 10,
+    right: 10,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "rgba(0,0,0,0.6)",
+    alignItems: "center",
+    justifyContent: "center",
   },
   sendBtn: {
     height: 50,

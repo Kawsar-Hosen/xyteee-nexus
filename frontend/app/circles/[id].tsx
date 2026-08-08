@@ -679,7 +679,7 @@ export default function CirclePage() {
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        behavior="padding"
         keyboardVerticalOffset={0}
       >
       <LinearGradient

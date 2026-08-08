@@ -24,6 +24,7 @@ import Animated, {
   withSpring,
 } from "react-native-reanimated";
 import { Swipeable } from "react-native-gesture-handler";
+import { Image as ExpoImage } from "expo-image";
 
 import { useTheme } from "@/src/context/ThemeContext";
 import { useAuth } from "@/src/context/AuthContext";
@@ -867,6 +868,17 @@ const NotificationCard = React.memo(function NotificationCard({
               ) : null}
             </View>
 
+            {/* Banner image (feature broadcasts) */}
+            {item.data?.image ? (
+              <View style={styles.cardImageWrap}>
+                <ExpoImage
+                  source={{ uri: item.data.image }}
+                  style={styles.cardImage}
+                  contentFit="cover"
+                />
+              </View>
+            ) : null}
+
             {/* Friend request actions */}
             {item.kind === "friend_request" ? (
               <View style={styles.actionRow}>
@@ -1174,6 +1186,15 @@ const styles = StyleSheet.create({
   cardRow: {
     flexDirection: "row",
     alignItems: "flex-start",
+  },
+  cardImageWrap: {
+    marginTop: 12,
+    borderRadius: radii.lg,
+    overflow: "hidden",
+  },
+  cardImage: {
+    width: "100%",
+    aspectRatio: 16 / 9,
   },
   avatarArea: { position: "relative" },
   typeBadge: {

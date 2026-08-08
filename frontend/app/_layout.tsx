@@ -3,7 +3,7 @@ import Head from "expo-router/head";
 import * as SplashScreen from "expo-splash-screen";
 import * as Notifications from "expo-notifications";
 import { useEffect } from "react";
-import { LogBox, View } from "react-native";
+import { LogBox, Platform, View } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -13,6 +13,7 @@ import { useAppFonts } from "@/src/hooks/use-app-fonts";
 import { ThemeProvider, useTheme } from "@/src/context/ThemeContext";
 import { AuthProvider, useAuth } from "@/src/context/AuthContext";
 import { WsProvider } from "@/src/context/WsContext";
+import { CallProvider, useCallManager } from "@/src/context/CallContext";
 import {
   registerForPushNotifications,
   setupNotificationChannelsAndCategories,
@@ -30,6 +31,7 @@ function AppShell() {
   const { mode, colors } = useTheme();
   const { user, token } = useAuth();
   const router = useRouter();
+  const callManager = useCallManager();
 
   useEffect(() => {
     if (!user || !token) return;
@@ -83,19 +85,39 @@ function AppShell() {
       }
 
       // ── Call actions from notification ─────────────────────────────
-      // Accept: open the chat — the pending call is picked up there and the
-      // in-app call overlay shows the Accept/Decline buttons.
+      const isCallAction =
+        actionId === "accept_call" || actionId === "decline_call";
+      if (isCallAction) {
+        // The app may have been ringing in the background — stop the ringtone
+        // now, since the user has interacted with the call.
+        if (Platform.OS !== "web") {
+          try {
+            // eslint-disable-next-line @typescript-eslint/no-var-requires
+            const InCallManager = (require("react-native-incall-manager") as any)
+              .default;
+            InCallManager.stopRingtone();
+          } catch {}
+        }
+      }
+
+      // Accept: open the chat and surface the pending call in the global
+      // overlay, which is picked up by the call manager.
       if (actionId === "accept_call" && data?.conversation_id) {
+        callManager.checkPending(data.conversation_id as string);
         router.push(`/chat/${data.conversation_id}` as any);
         return;
       }
 
-      // Decline: tell the backend to clear the pending call + notify the caller
+      // Decline: tell the backend to clear the pending call + notify the
+      // caller, and drop any local incoming-call state.
       if (
         actionId === "decline_call" &&
         data?.conversation_id &&
         token
       ) {
+        if (callManager.call) {
+          callManager.endCall();
+        }
         api("/calls/decline", {
           method: "POST",
           token,
@@ -173,7 +195,9 @@ export default function RootLayout() {
           <ThemeProvider>
             <AuthProvider>
               <WsProvider>
-                <AppShell />
+                <CallProvider>
+                  <AppShell />
+                </CallProvider>
               </WsProvider>
             </AuthProvider>
           </ThemeProvider>

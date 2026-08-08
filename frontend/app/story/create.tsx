@@ -57,6 +57,7 @@ export default function StoryCreate() {
   const { token } = useAuth();
   const router = useRouter();
   const [media, setMedia] = useState<string | null>(null);
+  const [mediaMime, setMediaMime] = useState<string | undefined>(undefined);
   const [mediaKind, setMediaKind] = useState<"image" | "video">("image");
   const [mediaError, setMediaError] = useState<string | null>(null);
 
@@ -252,6 +253,7 @@ export default function StoryCreate() {
 
     setMediaKind(isVideo ? "video" : "image");
     setMedia(asset.uri);
+    setMediaMime(asset.mimeType);
   };
 
   const publish = async () => {
@@ -272,7 +274,7 @@ export default function StoryCreate() {
     setBusy(true);
     setUploadStatus("uploading");
     try {
-      const mediaUrl = await uploadFile(media, "stories", token);
+      const mediaUrl = await uploadFile(media, "stories", token, undefined, mediaMime);
       await api("/stories", {
         method: "POST",
         body: {

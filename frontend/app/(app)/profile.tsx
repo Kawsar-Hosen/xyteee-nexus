@@ -80,7 +80,7 @@ export default function Profile() {
     setUploadingPhoto(true);
     try {
       const asset = result.assets[0];
-      const url = await uploadFile(asset.uri, "profiles", token || "", asset.fileName || undefined);
+      const url = await uploadFile(asset.uri, "profiles", token || "", asset.fileName || undefined, asset.mimeType);
       await updateUser({ profile_picture: url });
     } catch {
       Alert.alert("Upload failed", "Could not update profile photo. Please try again.");
@@ -105,7 +105,7 @@ export default function Profile() {
     setUploadingPhoto(true);
     try {
       const asset = result.assets[0];
-      const url = await uploadFile(asset.uri, "profiles", token || "", asset.fileName || undefined);
+      const url = await uploadFile(asset.uri, "profiles", token || "", asset.fileName || undefined, asset.mimeType);
       await updateUser({ cover_picture: url });
     } catch {
       Alert.alert("Upload failed", "Could not update cover photo. Please try again.");

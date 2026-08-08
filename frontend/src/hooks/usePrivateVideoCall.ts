@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Platform } from "react-native";
+import { AudioModule } from "expo-audio";
 import { api } from "@/src/api/client";
 
 type VideoCallState = "idle" | "calling" | "incoming" | "connecting" | "active";
@@ -16,6 +18,7 @@ function requireWebRTC() {
     RTCPeerConnection: any;
     RTCIceCandidate: any;
     RTCSessionDescription: any;
+    MediaStream: any;
   };
 }
 
@@ -55,6 +58,7 @@ export function usePrivateVideoCall({
   const pendingIceRef = useRef<any[]>([]);
   const frontCameraRef = useRef<boolean>(true);
   const ringStateRef = useRef<"none" | "ringback" | "ringtone">("none");
+  const ringStopTimerRef = useRef<any>(null);
   const durationTimerRef = useRef<any>(null);
 
   const stopAllSounds = useCallback(() => {
@@ -79,6 +83,16 @@ export function usePrivateVideoCall({
       const InCallManager = requireInCallManager();
       InCallManager.stop();
     } catch {}
+
+    // Restore the normal audio mode so voice recording works after a call.
+    if (Platform.OS !== "web") {
+      try {
+        AudioModule.setAudioModeAsync({
+          allowsRecording: false,
+          playsInSilentMode: true,
+        });
+      } catch {}
+    }
 
     try {
       localStreamRef.current?.getTracks().forEach((t: any) => t.stop());
@@ -110,15 +124,30 @@ export function usePrivateVideoCall({
         ringStateRef.current = "ringback";
       } catch {}
     } else if (callState === "incoming") {
-      // Receiver phone rings
+      // Receiver phone rings. Native "seconds" only stops it on Android, so
+      // also force-stop after 60s on every platform if still unanswered.
       try {
         const InCallManager = requireInCallManager();
-        InCallManager.startRingtone("_DEFAULT_");
+        InCallManager.startRingtone("_DEFAULT_", undefined, undefined, 60);
         ringStateRef.current = "ringtone";
       } catch {}
+      clearTimeout(ringStopTimerRef.current);
+      ringStopTimerRef.current = setTimeout(() => {
+        try {
+          const InCallManager = requireInCallManager();
+          InCallManager.stopRingtone();
+          ringStateRef.current = "none";
+        } catch {}
+      }, 60_000);
     } else if (callState === "active") {
       // Call connected — stop all sounds and start the duration timer
       stopAllSounds();
+      // Re-assert loudspeaker routing once connected (some devices drop the
+      // route after the ICE handshake).
+      try {
+        const InCallManager = requireInCallManager();
+        InCallManager.setForceSpeakerphoneOn(true);
+      } catch {}
       setCallDuration(0);
       durationTimerRef.current = setInterval(() => {
         setCallDuration((d) => d + 1);
@@ -126,6 +155,7 @@ export function usePrivateVideoCall({
     } else {
       // idle / connecting — stop sounds, clear timer
       stopAllSounds();
+      clearTimeout(ringStopTimerRef.current);
       if (durationTimerRef.current) {
         clearInterval(durationTimerRef.current);
         durationTimerRef.current = null;
@@ -133,6 +163,7 @@ export function usePrivateVideoCall({
     }
 
     return () => {
+      clearTimeout(ringStopTimerRef.current);
       if (callState === "active" && durationTimerRef.current) {
         clearInterval(durationTimerRef.current);
         durationTimerRef.current = null;
@@ -146,6 +177,28 @@ export function usePrivateVideoCall({
     const { mediaDevices, RTCPeerConnection } = requireWebRTC();
     const InCallManager = requireInCallManager();
 
+    // Reset any leftover expo-audio recording mode before opening the mic.
+    // On Android a stale `allowsRecording: true` keeps the WebRTC audio
+    // device module from capturing/playing call audio.
+    if (Platform.OS !== "web") {
+      try {
+        await AudioModule.setAudioModeAsync({
+          allowsRecording: false,
+          playsInSilentMode: true,
+        });
+      } catch {}
+    }
+
+    // Configure Android call audio routing *before* getUserMedia so the
+    // AudioDeviceModule starts with the right mode. Video calls default to
+    // the loudspeaker.
+    try {
+      InCallManager.start({ media: "video" });
+    } catch {}
+    try {
+      InCallManager.setForceSpeakerphoneOn(true);
+    } catch {}
+
     const stream = await mediaDevices.getUserMedia({
       audio: true,
       video: { facingMode: "user" },
@@ -153,8 +206,6 @@ export function usePrivateVideoCall({
 
     localStreamRef.current = stream;
     setLocalStream(stream);
-
-    InCallManager.start({ media: "video" });
 
     const peer = new RTCPeerConnection({ iceServers: ICE_SERVERS });
 
@@ -165,6 +216,13 @@ export function usePrivateVideoCall({
     (peer as any).addEventListener("track", (event: any) => {
       if (event.streams && event.streams[0]) {
         setRemoteStream(event.streams[0]);
+      } else if (event.track) {
+        // Some builds deliver the track without stream info — wrap it so
+        // RTCView still has a valid stream URL to render.
+        try {
+          const { MediaStream } = requireWebRTC();
+          setRemoteStream(new MediaStream([event.track]));
+        } catch {}
       }
     });
 

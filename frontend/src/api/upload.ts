@@ -1,5 +1,4 @@
 import { Platform } from "react-native";
-import { File as ExpoFile } from "expo-file-system";
 import { API_BASE } from "./client";
 
 /**
@@ -49,11 +48,33 @@ function getExt(uri: string, contentType?: string): string {
  * Upload a file to the backend → R2 storage.
  * Returns the public URL of the uploaded file.
  */
+const EXT_TO_MIME: Record<string, string> = {
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  gif: "image/gif",
+  webp: "image/webp",
+  heic: "image/heic",
+  mp4: "video/mp4",
+  mov: "video/quicktime",
+  m4a: "audio/m4a",
+  aac: "audio/aac",
+  mp3: "audio/mpeg",
+  wav: "audio/wav",
+  pdf: "application/pdf",
+};
+
+function mimeTypeFor(ext: string, mimeType?: string): string {
+  if (mimeType && mimeType !== "application/octet-stream") return mimeType;
+  return EXT_TO_MIME[ext] || "application/octet-stream";
+}
+
 export async function uploadFile(
   uri: string,
   kind: string,
   token: string,
-  fileName?: string
+  fileName?: string,
+  mimeType?: string
 ): Promise<string> {
   const isWeb = Platform.OS === "web";
   const url = `${API_BASE}/upload?kind=${encodeURIComponent(kind)}`;
@@ -84,12 +105,21 @@ export async function uploadFile(
     return data.url;
   }
 
-  // Native: use the modern File API (Blob) directly — no slow base64 round-trip
+  // Native: RN's FormData can only serialize a plain `{uri, name, type}` part.
+  // An expo-file-system `File` won't work here — its `uri` is a non-enumerable
+  // native getter so it never reaches the FormData part, it has no `type`
+  // property, and `Paths.join` mangles `content://` into `content:/`. Pass the
+  // raw picker URI; RN 0.81 reads `content://` via the ContentResolver.
   const ext = (fileName || uri).split(".").pop()?.toLowerCase() || "bin";
-
-  const file = new ExpoFile(uri);
   const form = new FormData();
-  form.append("file", file as unknown as Blob, fileName || `upload.${ext}`);
+  form.append(
+    "file",
+    {
+      uri,
+      name: fileName || `upload.${ext}`,
+      type: mimeTypeFor(ext, mimeType),
+    } as any
+  );
 
   const res = await fetch(url, {
     method: "POST",

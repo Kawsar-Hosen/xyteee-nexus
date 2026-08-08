@@ -655,6 +655,85 @@ hub = Hub()
 # Pending voice-call offers for users who open the app from a push notification.
 pending_voice_calls: Dict[str, dict] = {}
 
+# Answered (active) calls keyed by conversation_id — used to compute call duration
+# for call-status messages when the call ends.
+active_calls: Dict[str, dict] = {}
+
+# Conversations for which a call-status message has already been logged. This
+# prevents duplicate messages when both sides send call_end, or when a push
+# decline races with a websocket call_end.
+call_status_logged: Set[str] = set()
+
+
+def _format_call_duration(seconds: int) -> str:
+    seconds = max(int(seconds), 0)
+    h, rem = divmod(seconds, 3600)
+    m, s = divmod(rem, 60)
+    if h:
+        return f"{h}h {m:02d}m"
+    if m:
+        return f"{m}m {s:02d}s"
+    return f"{s}s"
+
+
+async def _insert_call_status_message(
+    conversation_id: str,
+    participants: List[str],
+    sender_id: str,
+    call_type: str,
+    status: str,
+    duration_sec: int,
+):
+    """Insert a system call-status message into the chat and broadcast it live.
+
+    status is one of "ended" (connected call finished), "canceled" (caller
+    hung up before the callee answered) or "rejected" (callee declined).
+    """
+    if conversation_id in call_status_logged:
+        return
+    call_status_logged.add(conversation_id)
+
+    kind = "call_voice" if call_type == "voice" else "call_video"
+    if status == "ended":
+        label = "Voice call ended" if call_type == "voice" else "Video call ended"
+        if duration_sec and duration_sec >= 1:
+            label += f" · {_format_call_duration(duration_sec)}"
+    else:
+        label = "Canceled voice call" if call_type == "voice" else "Canceled video call"
+
+    msg = {
+        "message_id": make_id("msg"),
+        "conversation_id": conversation_id,
+        "sender_id": sender_id,
+        "content": label,
+        "kind": kind,
+        "media": json.dumps({
+            "type": "call",
+            "call_type": call_type,
+            "status": status,
+            "duration_sec": max(int(duration_sec or 0), 0),
+        }),
+        "file_name": None,
+        "reply_to": None,
+        "edited": False,
+        "deleted_for_everyone": False,
+        "deleted_for": [],
+        "read_by": participants,
+        "delivered_to": participants,
+        "reactions": [],
+        "pinned_for": [],
+        "created_at": ts(now_utc()),
+    }
+    try:
+        await run(lambda: sb.table("messages").insert(msg).execute())
+        await run(lambda: sb.table("conversations")
+            .update({"last_message": label, "last_message_at": ts(now_utc())})
+            .eq("conversation_id", conversation_id).execute())
+        for p in participants:
+            await broadcast_to_user(p, {"type": "message", "message": msg})
+    except Exception as e:
+        logger.warning("Call status message insert failed: %s", e)
+
 
 async def broadcast_to_user(user_id: str, payload: dict):
     await hub.send(user_id, jsonable(payload))
@@ -3898,7 +3977,7 @@ async def mark_read(notif_id: str, user=Depends(current_user)):
 # ── Pending voice call ─────────────────────────────────────────────────────────
 @api.get("/calls/pending")
 async def get_pending_voice_call(
-    conversation_id: str,
+    conversation_id: str | None = None,
     user=Depends(current_user),
 ):
     user_id = user["user_id"]
@@ -3911,7 +3990,7 @@ async def get_pending_voice_call(
         pending_voice_calls.pop(user_id, None)
         return {"call": None}
 
-    if pending.get("conversation_id") != conversation_id:
+    if conversation_id and pending.get("conversation_id") != conversation_id:
         return {"call": None}
 
     return {
@@ -3935,6 +4014,8 @@ async def decline_call(
     user_id = user["user_id"]
     pending = pending_voice_calls.pop(user_id, None)
     end_event = "video_call_end" if (pending or {}).get("type") == "video" else "call_end"
+    call_type = (pending or {}).get("type") or "voice"
+    active_calls.pop(conversation_id, None)
 
     participants = typing_conversations.get(conversation_id, [])
     if not participants:
@@ -3947,6 +4028,9 @@ async def decline_call(
         )
         if cr.data:
             participants = cr.data[0].get("participants", [])
+
+    await _insert_call_status_message(
+        conversation_id, participants, user_id, call_type, "rejected", 0)
 
     for participant_id in participants:
         if participant_id != user_id:
@@ -4192,6 +4276,10 @@ async def websocket_endpoint(ws: WebSocket, token: str):
                 if user_id in participants:
                     if t in {"call_offer", "video_call_offer"}:
                         call_type = "voice" if t == "call_offer" else "video"
+                        # A fresh call resets any previous call-status logging for
+                        # this conversation so a new status message can be inserted.
+                        call_status_logged.discard(conv_id)
+                        active_calls.pop(conv_id, None)
                         for participant_id in participants:
                             if participant_id != user_id:
                                 pending_voice_calls[participant_id] = {
@@ -4203,12 +4291,40 @@ async def websocket_endpoint(ws: WebSocket, token: str):
                                 }
 
                     elif t in {"call_answer", "video_call_answer"}:
-                        pending_voice_calls.pop(user_id, None)
+                        pending = pending_voice_calls.pop(user_id, None)
+                        active_calls[conv_id] = {
+                            "started_at": now_utc(),
+                            "type": (pending or {}).get("type") or
+                                    ("voice" if t == "call_answer" else "video"),
+                            "caller_id": (pending or {}).get("caller_id"),
+                        }
 
                     elif t in {"call_end", "video_call_end"}:
+                        end_type = "voice" if t == "call_end" else "video"
+                        ac = active_calls.pop(conv_id, None)
+                        pending_for_sender = pending_voice_calls.get(user_id)
                         for participant_id in participants:
                             pending_voice_calls.pop(participant_id, None)
                         pending_voice_calls.pop(user_id, None)
+
+                        if ac is not None:
+                            duration_sec = int(
+                                (now_utc() - ac["started_at"]).total_seconds())
+                            await _insert_call_status_message(
+                                conv_id, participants, user_id,
+                                ac["type"], "ended", duration_sec)
+                        elif pending_for_sender is not None:
+                            # The callee hung up / declined while it was still
+                            # ringing → rejected.
+                            await _insert_call_status_message(
+                                conv_id, participants, user_id,
+                                pending_for_sender.get("type") or end_type,
+                                "rejected", 0)
+                        else:
+                            # The caller hung up before the callee answered.
+                            await _insert_call_status_message(
+                                conv_id, participants, user_id,
+                                end_type, "canceled", 0)
 
                     payload = {
                         "type": t,
@@ -5115,6 +5231,7 @@ async def admin_update_report(
 class BroadcastBody(BaseModel):
     title: str = Field(..., min_length=1, max_length=120)
     message: str = Field(..., min_length=1, max_length=500)
+    image: Optional[str] = None
     data: Optional[dict] = None
 
 
@@ -5127,7 +5244,11 @@ async def admin_broadcast(body: BroadcastBody, _admin: dict = Depends(require_ad
     if not title or not message:
         raise HTTPException(status_code=400, detail="Title and message are required")
 
+    image = (body.image or "").strip() or None
+
     data = {"kind": "feature_update", "title": title, "message": message, **jsonable(body.data or {})}
+    if image:
+        data["image"] = image
 
     # 1) In-app notification for every user (batched upsert).
     user_ids: List[str] = []
@@ -5199,6 +5320,7 @@ async def admin_broadcast(body: BroadcastBody, _admin: dict = Depends(require_ad
                 "data": data,
                 "priority": "normal",
                 "channelId": "default",
+                **({"richContent": {"image": image}} if image else {}),
             }
             for t in batch
         ]

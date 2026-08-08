@@ -76,7 +76,7 @@ export default function SetupProfile() {
     const asset = result.assets[0];
     setSaving(true);
     try {
-      const url = await uploadFile(asset.uri, "profiles", token || "", asset.fileName || undefined);
+      const url = await uploadFile(asset.uri, "profiles", token || "", asset.fileName || undefined, asset.mimeType);
       if (target === "avatar") setAvatar(url);
       else setCover(url);
     } finally { setSaving(false); }

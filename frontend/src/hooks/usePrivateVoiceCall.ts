@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Platform } from "react-native";
+import { AudioModule } from "expo-audio";
 import { api } from "@/src/api/client";
 
 type CallState = "idle" | "calling" | "incoming" | "connecting" | "active";
@@ -55,7 +57,9 @@ export function usePrivateVoiceCall({
   const pendingOfferRef = useRef<any>(null);
   const pendingIceRef = useRef<any[]>([]);
   const ringStateRef = useRef<"none" | "ringback" | "ringtone">("none");
+  const ringStopTimerRef = useRef<any>(null);
   const durationTimerRef = useRef<any>(null);
+  const speakerOnRef = useRef(false);
 
   const stopAllSounds = useCallback(() => {
     try {
@@ -81,6 +85,16 @@ export function usePrivateVoiceCall({
       InCallManager.stop();
     } catch {}
 
+    // Restore the normal audio mode so voice recording works after a call.
+    if (Platform.OS !== "web") {
+      try {
+        AudioModule.setAudioModeAsync({
+          allowsRecording: false,
+          playsInSilentMode: true,
+        });
+      } catch {}
+    }
+
     try {
       localStreamRef.current?.getTracks().forEach((track: any) => track.stop());
     } catch {}
@@ -95,6 +109,7 @@ export function usePrivateVoiceCall({
     pendingIceRef.current = [];
     setMuted(false);
     setSpeakerOn(false);
+    speakerOnRef.current = false;
     setCallState("idle");
   }, [stopAllSounds]);
 
@@ -108,15 +123,30 @@ export function usePrivateVoiceCall({
         ringStateRef.current = "ringback";
       } catch {}
     } else if (callState === "incoming") {
-      // Receiver phone rings
+      // Receiver phone rings. Native "seconds" only stops it on Android, so
+      // also force-stop after 60s on every platform if still unanswered.
       try {
         const InCallManager = requireInCallManager();
-        InCallManager.startRingtone("_DEFAULT_");
+        InCallManager.startRingtone("_DEFAULT_", undefined, undefined, 60);
         ringStateRef.current = "ringtone";
       } catch {}
+      clearTimeout(ringStopTimerRef.current);
+      ringStopTimerRef.current = setTimeout(() => {
+        try {
+          const InCallManager = requireInCallManager();
+          InCallManager.stopRingtone();
+          ringStateRef.current = "none";
+        } catch {}
+      }, 60_000);
     } else if (callState === "active") {
       // Call connected — stop all sounds and start the duration timer
       stopAllSounds();
+      // Re-assert Android audio routing once connected (some devices drop
+      // the earpiece/speaker route after the ICE handshake).
+      try {
+        const InCallManager = requireInCallManager();
+        InCallManager.setForceSpeakerphoneOn(speakerOnRef.current);
+      } catch {}
       setCallDuration(0);
       durationTimerRef.current = setInterval(() => {
         setCallDuration((d) => d + 1);
@@ -124,6 +154,7 @@ export function usePrivateVoiceCall({
     } else {
       // idle / connecting — stop sounds, clear timer
       stopAllSounds();
+      clearTimeout(ringStopTimerRef.current);
       if (durationTimerRef.current) {
         clearInterval(durationTimerRef.current);
         durationTimerRef.current = null;
@@ -131,6 +162,7 @@ export function usePrivateVoiceCall({
     }
 
     return () => {
+      clearTimeout(ringStopTimerRef.current);
       if (callState === "active" && durationTimerRef.current) {
         clearInterval(durationTimerRef.current);
         durationTimerRef.current = null;
@@ -144,16 +176,35 @@ export function usePrivateVoiceCall({
     const { mediaDevices, RTCPeerConnection } = requireWebRTC();
     const InCallManager = requireInCallManager();
 
+    // Reset any leftover expo-audio recording mode before opening the mic.
+    // On Android a stale `allowsRecording: true` keeps the WebRTC audio
+    // device module from capturing/playing call audio ("call connects but
+    // no two-way audio").
+    if (Platform.OS !== "web") {
+      try {
+        await AudioModule.setAudioModeAsync({
+          allowsRecording: false,
+          playsInSilentMode: true,
+        });
+      } catch {}
+    }
+
+    // Put Android into MODE_IN_COMMUNICATION + earpiece routing *before*
+    // getUserMedia so the AudioDeviceModule starts with the right mode.
+    try {
+      InCallManager.start({ media: "audio" });
+    } catch {}
+    try {
+      InCallManager.setForceSpeakerphoneOn(false);
+    } catch {}
+    setSpeakerOn(false);
+
     const stream = await mediaDevices.getUserMedia({
       audio: true,
       video: false,
     });
 
     localStreamRef.current = stream;
-
-    InCallManager.start({ media: "audio" });
-    InCallManager.setForceSpeakerphoneOn(false);
-    setSpeakerOn(false);
 
     const peer = new RTCPeerConnection({ iceServers: ICE_SERVERS });
 
@@ -246,6 +297,7 @@ export function usePrivateVoiceCall({
       const InCallManager = requireInCallManager();
       const next = !speakerOn;
       InCallManager.setForceSpeakerphoneOn(next);
+      speakerOnRef.current = next;
       setSpeakerOn(next);
     } catch {}
   }, [speakerOn]);
