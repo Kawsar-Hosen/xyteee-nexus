@@ -9,6 +9,7 @@ import {
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
+import Head from "expo-router/head";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as WebBrowser from "expo-web-browser";
 import * as Google from "expo-auth-session/providers/google";
@@ -36,7 +37,10 @@ export default function Welcome() {
 
   const redirectUri =
     Platform.OS === "android"
-      ? `com.googleusercontent.apps.${GOOGLE_ANDROID_CLIENT_ID}:/oauth2redirect`
+      ? `com.googleusercontent.apps.${GOOGLE_ANDROID_CLIENT_ID.replace(
+          /\.apps\.googleusercontent\.com$/,
+          ""
+        )}:/oauth2redirect`
       : makeRedirectUri();
 
   const [, googleResponse, promptGoogleAsync] = Google.useIdTokenAuthRequest({
@@ -85,6 +89,15 @@ export default function Welcome() {
 
   return (
     <View style={{ flex: 1, backgroundColor: "#070709" }}>
+      <Head>
+        <title>XYTEEE Nexus — Where quiet conversations become close bonds</title>
+        <meta
+          name="description"
+          content="Sign in to XYTEEE Nexus — a serene, real-time space for the people who matter most. Private chat, stories, circles, voice and video calls."
+        />
+        <meta property="og:title" content="XYTEEE Nexus" />
+        <meta property="og:description" content="Where quiet conversations become close bonds. Private chat, stories, circles, voice and video calls." />
+      </Head>
       <Image source={{ uri: BG }} style={StyleSheet.absoluteFillObject} blurRadius={12} />
       <LinearGradient
         colors={["rgba(7,7,9,0.55)", "rgba(7,7,9,0.88)", "#070709"]}

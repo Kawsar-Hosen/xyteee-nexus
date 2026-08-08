@@ -62,7 +62,13 @@
     "web": {
       "bundler": "metro",
       "output": "single",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/images/favicon.png",
+      "name": "XYTEEE Nexus",
+      "shortName": "Nexus",
+      "description": "A serene, real-time space for the people who matter most. Private chat, stories, circles, voice and video calls on XYTEEE Nexus.",
+      "lang": "en",
+      "themeColor": "#070709",
+      "backgroundColor": "#070709"
     },
     "plugins": [
       "expo-router",

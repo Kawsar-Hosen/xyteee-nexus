@@ -1,4 +1,5 @@
 import { Stack, useRouter } from "expo-router";
+import Head from "expo-router/head";
 import * as SplashScreen from "expo-splash-screen";
 import * as Notifications from "expo-notifications";
 import { useEffect } from "react";
@@ -134,6 +135,13 @@ function AppShell() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <Head>
+        <title>XYTEEE Nexus — Where quiet conversations become close bonds</title>
+        <meta
+          name="description"
+          content="A serene, real-time space for the people who matter most. Private chat, stories, circles, voice and video calls on XYTEEE Nexus."
+        />
+      </Head>
       <StatusBar style={mode === "dark" ? "light" : "dark"} />
       <Stack
         screenOptions={{
@@ -160,15 +168,17 @@ export default function RootLayout() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <SafeAreaProvider>
-        <ThemeProvider>
-          <AuthProvider>
-            <WsProvider>
-              <AppShell />
-            </WsProvider>
-          </AuthProvider>
-        </ThemeProvider>
-      </SafeAreaProvider>
+      <Head.Provider>
+        <SafeAreaProvider>
+          <ThemeProvider>
+            <AuthProvider>
+              <WsProvider>
+                <AppShell />
+              </WsProvider>
+            </AuthProvider>
+          </ThemeProvider>
+        </SafeAreaProvider>
+      </Head.Provider>
     </GestureHandlerRootView>
   );
 }

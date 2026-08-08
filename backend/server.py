@@ -14,7 +14,7 @@ import smtplib
 from email.message import EmailMessage
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
-from typing import Optional, List, Dict, Any, Set
+from typing import Optional, List, Dict, Any, Set, Tuple
 
 import jwt
 from bcrypt import hashpw, checkpw, gensalt
@@ -372,6 +372,7 @@ async def _send_expo_push(to_user: str, kind: str, data: dict):
         "account_moderated": "Account suspended" if data.get("status") == "suspended" else "Account banned",
         "account_restored": "Account restored",
         "circle_message": data.get("circle_name") or "Circle message",
+        "feature_update": "What's new in Nexus",
     }
 
     from_name = data.get("from_name") or "Someone"
@@ -394,6 +395,7 @@ async def _send_expo_push(to_user: str, kind: str, data: dict):
         "account_moderated": data.get("reason") or "Your account status has been updated",
         "account_restored": "Your account has been restored. You can use Nexus again.",
         "circle_message": f"{from_name}: {data.get('preview') or 'Sent a message'}",
+        "feature_update": "Check out the latest updates",
     }
 
     # Call notifications use a dedicated high-priority channel and the "call"
@@ -407,7 +409,7 @@ async def _send_expo_push(to_user: str, kind: str, data: dict):
         msg: dict = {
             "to": token,
             "sound": "default",
-            "title": title_map.get(kind, "XYTEEE Nexus"),
+            "title": data.get("title") or title_map.get(kind, "XYTEEE Nexus"),
             "body": data.get("message") or data.get("body") or body_map.get(kind, "You have a new notification"),
             "data": {"kind": kind, **jsonable(data)},
             # High priority ensures timely delivery on both iOS and Android
@@ -426,34 +428,69 @@ async def _send_expo_push(to_user: str, kind: str, data: dict):
 
     messages = [build_message(token) for token in tokens]
 
-    async with httpx.AsyncClient(timeout=10) as client:
-        response = await client.post(
-            "https://exp.host/--/api/v2/push/send",
-            json=messages,
-            headers={"Content-Type": "application/json"},
-        )
-        response.raise_for_status()
-        result = response.json()
-        logger.info("Expo push response for %s: %s", to_user, result)
-
-    # Clean up invalid device tokens (e.g. DeviceNotRegistered after the app
-    # was uninstalled) so future sends don't keep targeting dead devices.
-    data = result.get("data") or []
-    pending_receipts: Dict[str, str] = {}
-    for i, ticket in enumerate(data):
-        token = messages[i]["to"] if i < len(messages) else None
-        status = ticket.get("status")
-        details = ticket.get("details") or {}
-        if status == "ok" and ticket.get("id") and token:
-            pending_receipts[ticket["id"]] = token
-        elif (
-            status == "error"
-            and details.get("error") == "DeviceNotRegistered"
-            and token
-        ):
+    sent, dead_tokens, pending_receipts = await _send_expo_messages(messages)
+    if dead_tokens:
+        for token in set(dead_tokens):
             await _delete_push_token(token)
     if pending_receipts:
         asyncio.ensure_future(_cleanup_push_receipts(pending_receipts))
+    logger.info("Expo push for %s (%s): sent=%s/%s", to_user, kind, sent, len(tokens))
+
+
+async def _send_expo_messages(
+    messages: List[dict],
+) -> Tuple[int, List[str], Dict[str, str]]:
+    """POST a list of Expo push messages.
+
+    Returns (ok_count, dead_tokens, pending_receipts).
+    Expo rejects a request whose device tokens belong to different projects
+    (PUSH_TOO_MANY_EXPERIENCE_IDS, e.g. tokens registered under an older Expo
+    account). In that case we retry each message individually so a stale token
+    never blocks delivery to valid ones.
+    """
+    if not messages:
+        return 0, [], {}
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                "https://exp.host/--/api/v2/push/send",
+                json=messages,
+                headers={"Content-Type": "application/json"},
+            )
+    except httpx.HTTPError as e:
+        logger.warning("Expo push request failed: %s", e)
+        return 0, [], {}
+
+    if resp.status_code == 400 and len(messages) > 1:
+        ok_count, dead_tokens, pending_receipts = 0, [], {}
+        for m in messages:
+            s, d, p = await _send_expo_messages([m])
+            ok_count += s
+            dead_tokens.extend(d)
+            pending_receipts.update(p)
+        return ok_count, dead_tokens, pending_receipts
+
+    if resp.status_code != 200:
+        logger.warning("Expo push rejected %d message(s): %s", len(messages), resp.text[:300])
+        return 0, [], {}
+
+    ok_count, dead_tokens, pending_receipts = 0, [], {}
+    for msg, ticket in zip(messages, (resp.json().get("data") or [])):
+        status = ticket.get("status")
+        details = ticket.get("details") or {}
+        if status == "ok" and ticket.get("id"):
+            ok_count += 1
+            pending_receipts[ticket["id"]] = msg["to"]
+        elif status == "error" and details.get("error") in (
+            "DeviceNotRegistered",
+            "InvalidCredentials",
+        ):
+            # DeviceNotRegistered: app uninstalled.
+            # InvalidCredentials: token belongs to a project that can no longer
+            # receive pushes (e.g. registered under an older Expo project).
+            dead_tokens.append(msg["to"])
+    return ok_count, dead_tokens, pending_receipts
 
 
 async def _delete_push_token(expo_push_token: str):
@@ -3371,6 +3408,10 @@ async def send_message(body: MessageIn, user=Depends(current_user)):
         preview = "🎞️ GIF"
     elif body.kind == "sticker":
         preview = "🖼️ Sticker"
+    elif body.kind == "image":
+        preview = "📷 Photo"
+    elif body.kind == "video":
+        preview = "🎥 Video"
     elif body.kind == "live_location":
         preview = "📍 Live location"
     elif body.kind == "location":
@@ -5069,6 +5110,106 @@ async def admin_update_report(
     )
 
     return {"ok": True, "report_id": report_id, "status": body.status}
+
+
+class BroadcastBody(BaseModel):
+    title: str = Field(..., min_length=1, max_length=120)
+    message: str = Field(..., min_length=1, max_length=500)
+    data: Optional[dict] = None
+
+
+@api.post("/admin/broadcast", tags=["Admin Broadcast"])
+async def admin_broadcast(body: BroadcastBody, _admin: dict = Depends(require_admin)):
+    """Send a "new feature" announcement to all users: an in-app notification
+    row for every account + an Expo push to every registered device token."""
+    title = body.title.strip()
+    message = body.message.strip()
+    if not title or not message:
+        raise HTTPException(status_code=400, detail="Title and message are required")
+
+    data = {"kind": "feature_update", "title": title, "message": message, **jsonable(body.data or {})}
+
+    # 1) In-app notification for every user (batched upsert).
+    user_ids: List[str] = []
+    page = 0
+    while True:
+        r = await run(
+            lambda: sb.table("users")
+            .select("user_id")
+            .range(page * 500, (page + 1) * 500 - 1)
+            .execute()
+        )
+        rows = r.data or []
+        if not rows:
+            break
+        user_ids.extend(x["user_id"] for x in rows)
+        if len(rows) < 500:
+            break
+        page += 1
+
+    created_at = ts(now_utc())
+    notif_rows = [
+        {
+            "notif_id": make_id("ntf"),
+            "user_id": uid,
+            "kind": "feature_update",
+            "data": data,
+            "read": False,
+            "created_at": created_at,
+        }
+        for uid in user_ids
+    ]
+    for i in range(0, len(notif_rows), 200):
+        chunk = notif_rows[i : i + 200]
+        await run(lambda: sb.table("notifications").insert(chunk).execute())
+        for row in chunk:
+            await broadcast_to_user(
+                row["user_id"],
+                {"type": "notification", "notification": row},
+            )
+
+    # 2) Expo push to all registered device tokens (100 per request).
+    tokens: List[str] = []
+    page = 0
+    while True:
+        r = await run(
+            lambda: sb.table("push_tokens")
+            .select("expo_push_token")
+            .range(page * 1000, (page + 1) * 1000 - 1)
+            .execute()
+        )
+        rows = r.data or []
+        if not rows:
+            break
+        tokens.extend(x["expo_push_token"] for x in rows if x.get("expo_push_token"))
+        if len(rows) < 1000:
+            break
+        page += 1
+
+    sent = 0
+    dead_tokens: List[str] = []
+    for i in range(0, len(tokens), 100):
+        batch = tokens[i : i + 100]
+        messages = [
+            {
+                "to": t,
+                "sound": "default",
+                "title": title,
+                "body": message,
+                "data": data,
+                "priority": "normal",
+                "channelId": "default",
+            }
+            for t in batch
+        ]
+        s, d, _ = await _send_expo_messages(messages)
+        sent += s
+        dead_tokens.extend(d)
+    for token in set(dead_tokens):
+        await _delete_push_token(token)
+
+    logger.info("Admin broadcast sent: push=%s/%s tokens, in-app=%s users", sent, len(tokens), len(user_ids))
+    return {"ok": True, "push_sent": sent, "tokens": len(tokens), "users": len(user_ids)}
 
 
 @api.get("/reports/reasons", tags=["Reports"])

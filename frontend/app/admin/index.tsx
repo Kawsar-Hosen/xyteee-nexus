@@ -176,6 +176,25 @@ export default function AdminPanel() {
               </View>
             </TouchableOpacity>
 
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => router.push("/admin/broadcast")}
+              style={[styles.reportsCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
+            >
+              <View style={[styles.reportsIcon, { backgroundColor: "#8B5CF61e" }]}>
+                <Feather name="zap" size={16} color="#8B5CF6" />
+              </View>
+              <View style={{ flex: 1, marginLeft: 12 }}>
+                <NxText variant="titleSm">Broadcast</NxText>
+                <NxText variant="caption" style={{ color: colors.mutedFg }}>
+                  Announce a new feature to all users
+                </NxText>
+              </View>
+              <View style={styles.rowChevron}>
+                <Feather name="chevron-right" size={18} color={colors.mutedFg} />
+              </View>
+            </TouchableOpacity>
+
             <View style={styles.sectionHead}>
               <NxText variant="titleSm">All Users</NxText>
               <NxText variant="caption" style={{ color: colors.mutedFg }}>

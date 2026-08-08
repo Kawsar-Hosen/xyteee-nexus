@@ -68,6 +68,7 @@ const KIND_META: Record<string, KindMeta> = {
   security: { icon: "shield", color: "#F23F43" },
   gift: { icon: "gift", color: "#F0B232" },
   system: { icon: "megaphone", color: "#8B8D98" },
+  feature_update: { icon: "zap", color: "#8B5CF6" },
 };
 
 function kindMeta(kind: string): KindMeta {
@@ -115,6 +116,8 @@ function buildDescription(n: any): string {
       return n.data?.reason || "New login detected";
     case "system":
       return n.data?.message || "App updates or announcements";
+    case "feature_update":
+      return n.data?.message || "What's new in Nexus";
     case "circle_invite_accepted":
       return `accepted your invitation to ${n.data?.circle_name || "the Circle"}`;
     case "circle_invite_rejected":

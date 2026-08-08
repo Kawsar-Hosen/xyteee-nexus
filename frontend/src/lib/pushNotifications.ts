@@ -139,6 +139,10 @@ export function getNotificationRoute(data: any): string | null {
     return `/story/${data.story_owner_id}`;
   }
 
+  if (kind === "feature_update") {
+    return "/notifications";
+  }
+
   if (kind === "friend_request" || kind === "friend_accepted") {
     return "/(app)/friends";
   }

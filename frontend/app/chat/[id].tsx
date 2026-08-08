@@ -29,8 +29,10 @@ import Animated, {
   FadeIn,
   FadeInUp,
 } from "react-native-reanimated";
+import { Swipeable } from "react-native-gesture-handler";
+import { VideoView as ExpoVideoView, useVideoPlayer } from "expo-video";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import * as Haptics from "expo-haptics";
@@ -95,6 +97,17 @@ const chatCache: Record<string, {
   other: any;
 }> = {};
 
+function replyPreviewLabel(m: Msg): string {
+  if (m.kind === "voice") return "🎙 Voice message";
+  if (m.kind === "image") return "📷 Photo";
+  if (m.kind === "video") return "🎥 Video";
+  if (m.kind === "gif") return "🎞️ GIF";
+  if (m.kind === "sticker") return "🖼️ Sticker";
+  if (m.kind === "location") return "📍 Shared location";
+  if (m.kind === "live_location") return "📍 Live location";
+  return m.content ? m.content.slice(0, 80) : "Message";
+}
+
 export default function ChatScreen() {
   const {
     id,
@@ -157,9 +170,14 @@ export default function ChatScreen() {
   const [showAttachMenu, setShowAttachMenu] = useState(false);
   const [showLiveDuration, setShowLiveDuration] = useState(false);
   const [showMediaPicker, setShowMediaPicker] = useState(false);
+  const [viewerMsg, setViewerMsg] = useState<Msg | null>(null);
   const [inputBarHeight, setInputBarHeight] = useState(62);
   const listRef = useRef<FlatList>(null);
   const typingTimer = useRef<any>(null);
+  const atBottomRef = useRef(true);
+  const initialScrollDone = useRef(false);
+  const highlightTimer = useRef<any>(null);
+  const [highlightId, setHighlightId] = useState<string | null>(null);
 
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const isNarrow = screenWidth < 380;
@@ -357,17 +375,31 @@ export default function ChatScreen() {
     });
   }, [subscribe, conversation_id, user, other?.user_id, chatSettings.muted, chatSettings.soundEnabled]);
 
+  const scrollToBottom = useCallback((animated: boolean) => {
+    if (!listRef.current) return;
+    if (initialScrollDone.current && !atBottomRef.current) return;
+    listRef.current.scrollToEnd({ animated });
+    initialScrollDone.current = true;
+  }, []);
+
   useEffect(() => {
     if (!messages.length || loading) return;
 
     const timer = setTimeout(() => {
-      listRef.current?.scrollToEnd({
-        animated: messages.length > 1,
-      });
+      scrollToBottom(messages.length > 1);
     }, 80);
 
     return () => clearTimeout(timer);
-  }, [messages.length, loading]);
+  }, [messages.length, loading, scrollToBottom]);
+
+  useFocusEffect(
+    useCallback(() => {
+      const t = setTimeout(() => {
+        scrollToBottom(false);
+      }, 150);
+      return () => clearTimeout(t);
+    }, [scrollToBottom])
+  );
 
   const emitTyping = (isTyping: boolean) => {
     send({ type: "typing", conversation_id, is_typing: isTyping });
@@ -511,7 +543,8 @@ export default function ChatScreen() {
         type === "image"
           ? ImagePicker.MediaTypeOptions.Images
           : ImagePicker.MediaTypeOptions.Videos,
-      quality: 0.6,
+      // Send at the picked size — don't downscale/compress the original.
+      quality: 1.0,
       allowsEditing: false,
     });
 
@@ -522,13 +555,18 @@ export default function ChatScreen() {
     setSending(true);
     try {
       const url = await uploadFile(asset.uri, "chat", token!, asset.fileName || undefined);
+      // Store original dimensions so the bubble can keep the real aspect ratio.
+      const dims =
+        asset.width && asset.height
+          ? JSON.stringify({ w: asset.width, h: asset.height })
+          : "";
       await api("/chats/message", {
         method: "POST",
         body: {
           conversation_id,
           kind: type,
           media: url,
-          content: "",
+          content: dims,
         },
         token: token!,
       });
@@ -823,6 +861,24 @@ export default function ChatScreen() {
     const rest = base.filter((m) => !(m.pinned_for?.length || 0));
     return [...pinned, ...rest];
   }, [messages, showSearch, searchQ]);
+
+  const scrollToMessage = useCallback(
+    (messageId: string) => {
+      const idx = displayed.findIndex((m) => m.message_id === messageId);
+      if (idx === -1) return;
+      setHighlightId(messageId);
+      if (highlightTimer.current) clearTimeout(highlightTimer.current);
+      highlightTimer.current = setTimeout(() => setHighlightId(null), 2200);
+      requestAnimationFrame(() => {
+        listRef.current?.scrollToIndex({
+          index: idx,
+          viewPosition: 0.4,
+          animated: true,
+        });
+      });
+    },
+    [displayed]
+  );
 
   const chatBg = CHAT_WALLPAPERS[chatSettings.wallpaper]?.bg || "transparent";
   const sentTheme = CHAT_THEMES[chatSettings.theme]?.sent;
@@ -1148,6 +1204,12 @@ export default function ChatScreen() {
               m={item}
               isMe={item.sender_id === user?.user_id}
               onLongPress={() => setActionMsg(item)}
+              onReply={() => setReplyTo(item)}
+              onOpenMedia={() => setViewerMsg(item)}
+              onReplyPress={
+                item.reply_to ? () => scrollToMessage(item.reply_to!) : undefined
+              }
+              highlighted={highlightId === item.message_id}
               replySource={item.reply_to ? messages.find((x) => x.message_id === item.reply_to) : undefined}
               other={other}
               sentBg={sentTheme}
@@ -1156,6 +1218,29 @@ export default function ChatScreen() {
               onStopLive={(mid) => stopLiveSharing(mid)}
             />
           )}
+          onContentSizeChange={() => {
+            scrollToBottom(false);
+          }}
+          onScroll={(e) => {
+            const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+            const distFromBottom =
+              contentSize.height - (contentOffset.y + layoutMeasurement.height);
+            atBottomRef.current = distFromBottom < 80;
+          }}
+          scrollEventThrottle={100}
+          onScrollToIndexFailed={({ index, averageItemLength }) => {
+            listRef.current?.scrollToOffset({
+              offset: index * averageItemLength,
+              animated: true,
+            });
+            setTimeout(() => {
+              listRef.current?.scrollToIndex({
+                index,
+                viewPosition: 0.4,
+                animated: true,
+              });
+            }, 300);
+          }}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
           showsVerticalScrollIndicator={false}
@@ -1171,7 +1256,7 @@ export default function ChatScreen() {
           <View style={[styles.replyBar, { backgroundColor: colors.surface, borderColor: colors.border }]}>
             <View style={{ flex: 1 }}>
               <NxText variant="caption" style={{ color: colors.primary, fontFamily: fonts.bodySemi }}>Replying to</NxText>
-              <NxText variant="bodySm" numberOfLines={1}>{replyTo.content || "media"}</NxText>
+              <NxText variant="bodySm" numberOfLines={1}>{replyPreviewLabel(replyTo)}</NxText>
             </View>
             <TouchableOpacity onPress={() => setReplyTo(null)} testID="chat-cancel-reply">
               <Feather name="x" size={18} color={colors.mutedFg} />
@@ -1537,6 +1622,41 @@ export default function ChatScreen() {
         onDeleteConversation={handleDeleteConversation}
         onBlock={handleBlock}
       />
+
+      {/* ── Full-screen media viewer (photo / video / gif) ───────────── */}
+      <Modal
+        visible={!!viewerMsg}
+        transparent={false}
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={() => setViewerMsg(null)}
+      >
+        <View style={styles.viewerOverlay}>
+          <SafeAreaView edges={["top", "bottom"]} style={{ flex: 1 }}>
+            <View style={styles.viewerTopBar}>
+              <TouchableOpacity
+                testID="media-viewer-close"
+                onPress={() => setViewerMsg(null)}
+                style={styles.viewerClose}
+                activeOpacity={0.7}
+              >
+                <Feather name="x" size={24} color="#fff" />
+              </TouchableOpacity>
+            </View>
+            <View style={styles.viewerBody}>
+              {viewerMsg?.kind === "video" && viewerMsg.media ? (
+                <ViewerVideo uri={viewerMsg.media} />
+              ) : viewerMsg?.media ? (
+                <Image
+                  source={{ uri: viewerMsg.media }}
+                  style={styles.viewerImage}
+                  resizeMode="contain"
+                />
+              ) : null}
+            </View>
+          </SafeAreaView>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -1607,11 +1727,95 @@ function RecordingBar({ elapsed, onCancel, colors }: { elapsed: number; onCancel
   );
 }
 
+/* ── Video preview in chat bubble ───────────────────────────────────── */
+function BubbleVideo({
+  uri,
+  dims,
+}: {
+  uri: string;
+  dims: { width: number; height: number };
+}) {
+  const player = useVideoPlayer(uri, (p) => {
+    p.loop = true;
+    p.muted = true;
+  });
+
+  useEffect(() => {
+    player.loop = true;
+    player.muted = true;
+    player.pause();
+    return () => {
+      player.pause();
+    };
+  }, [player, uri]);
+
+  return (
+    <View
+      style={{
+        width: dims.width,
+        height: dims.height,
+        borderRadius: 14,
+        overflow: "hidden",
+        backgroundColor: "#000",
+      }}
+    >
+      <ExpoVideoView
+        player={player}
+        style={{ width: "100%", height: "100%" }}
+        contentFit="cover"
+        nativeControls={false}
+      />
+      <View
+        pointerEvents="none"
+        style={[
+          StyleSheet.absoluteFillObject,
+          { alignItems: "center", justifyContent: "center" },
+        ]}
+      >
+        <View style={styles.bubblePlay}>
+          <Feather name="play" size={22} color="#fff" style={{ marginLeft: 2 }} />
+        </View>
+      </View>
+    </View>
+  );
+}
+
+/* ── Full-screen video (media viewer) ─────────────────────────────── */
+function ViewerVideo({ uri }: { uri: string }) {
+  const player = useVideoPlayer(uri, (p) => {
+    p.loop = true;
+    p.muted = false;
+    p.play();
+  });
+
+  useEffect(() => {
+    player.loop = true;
+    player.muted = false;
+    player.play();
+    return () => {
+      player.pause();
+    };
+  }, [player, uri]);
+
+  return (
+    <ExpoVideoView
+      player={player}
+      style={styles.viewerVideo}
+      contentFit="contain"
+      nativeControls
+    />
+  );
+}
+
 /* ── Message bubble ───────────────────────────────────────────────── */
 function MessageBubble({
   m,
   isMe,
   onLongPress,
+  onReply,
+  onOpenMedia,
+  onReplyPress,
+  highlighted,
   replySource,
   other,
   sentBg,
@@ -1622,6 +1826,10 @@ function MessageBubble({
   m: Msg;
   isMe: boolean;
   onLongPress: () => void;
+  onReply?: () => void;
+  onOpenMedia?: () => void;
+  onReplyPress?: () => void;
+  highlighted?: boolean;
   replySource?: Msg;
   other?: any;
   sentBg?: string;
@@ -1632,16 +1840,28 @@ function MessageBubble({
   const { colors } = useTheme();
   const { token } = useAuth();
   const { width: screenWidth } = useWindowDimensions();
+  const swipeableRef = useRef<Swipeable | null>(null);
   const bubbleBg = isMe ? sentBg || colors.bubbleSent : colors.bubbleRecv;
   const bubbleFg = isMe ? sentFg || colors.bubbleSentFg : colors.bubbleRecvFg;
   const isDeleted = m.deleted_for_everyone || m.kind === "deleted";
   const isVoice = m.kind === "voice" && !!m.media;
   const isImage = m.kind === "image" && !!m.media;
+  const isVideo = m.kind === "video" && !!m.media;
   const isGif = m.kind === "gif" && !!m.media;
   const isSticker = m.kind === "sticker" && !!m.media;
   const isMedia = isGif || isSticker;
   const isLocation = m.kind === "location";
   const isLiveLocation = m.kind === "live_location";
+
+  const mediaDims = useMemo(() => {
+    if ((!isImage && !isVideo) || !m.content) return null;
+    try {
+      const p = JSON.parse(m.content);
+      if (typeof p.w === "number" && typeof p.h === "number")
+        return { w: p.w, h: p.h };
+    } catch {}
+    return null;
+  }, [isImage, isVideo, m.content]);
   const loc = useMemo(() => {
     if (!isLocation || !m.content) return null;
     try {
@@ -1733,6 +1953,22 @@ function MessageBubble({
     return { width: Math.max(48, w), height: Math.max(48, h) };
   }, [gifMeta, screenWidth]);
 
+  const photoDims = useMemo(() => {
+    const maxW = Math.min(screenWidth * 0.62, 240);
+    const maxH = Math.min(screenWidth * 0.62, 260);
+    if (mediaDims && mediaDims.w > 0 && mediaDims.h > 0) {
+      const aspect = mediaDims.w / mediaDims.h;
+      let w = maxW;
+      let h = maxW / aspect;
+      if (h > maxH) {
+        h = maxH;
+        w = maxH * aspect;
+      }
+      return { width: w, height: h };
+    }
+    return { width: maxW, height: Math.round(maxW * 0.75) };
+  }, [mediaDims, screenWidth]);
+
   const grouped = (m.reactions || []).reduce<Record<string, number>>((acc, r) => {
     acc[r.emoji] = (acc[r.emoji] || 0) + 1;
     return acc;
@@ -1798,6 +2034,30 @@ function MessageBubble({
         </View>
       )}
 
+        <Swipeable
+          ref={swipeableRef}
+          friction={0.5}
+          leftThreshold={52}
+          overshootLeft={false}
+          renderLeftActions={() => (
+            <View style={styles.swipeReplyAction}>
+              <View
+                style={[
+                  styles.swipeReplyIcon,
+                  { backgroundColor: colors.primary },
+                ]}
+              >
+                <Feather name="corner-up-left" size={18} color={colors.onPrimary} />
+              </View>
+            </View>
+          )}
+          onSwipeableOpen={(direction) => {
+            if (direction === "left") {
+              swipeableRef.current?.close();
+              onReply?.();
+            }
+          }}
+        >
         <Animated.View
           entering={isMe ? FadeInUp.duration(180) : undefined}
           style={{ maxWidth: bubbleMaxWidth, alignItems: isMe ? "flex-end" : "flex-start" }}
@@ -1811,7 +2071,8 @@ function MessageBubble({
             onLongPress();
           }}
           onPress={() => {
-            if ((isLocation || isLiveLocation) && (loc || liveData)) openMapLink();
+            if (isImage || isVideo) onOpenMedia?.();
+            else if ((isLocation || isLiveLocation) && (loc || liveData)) openMapLink();
             else if (linkUrl) openLink(linkUrl);
           }}
           activeOpacity={0.82}
@@ -1824,6 +2085,9 @@ function MessageBubble({
                 styles.bubble,
                 bubbleRadius,
                 { backgroundColor: bubbleBg, paddingHorizontal: 8, paddingVertical: 8 },
+                ...(highlighted
+                  ? [{ borderWidth: 1.5, borderColor: colors.primary }]
+                  : []),
               ]}
             >
               <VoiceBubble
@@ -1855,19 +2119,24 @@ function MessageBubble({
                         : { shadowColor: "#000", shadowOpacity: 0.15, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 3 }
                       )
                       : {}),
+                  ...(highlighted
+                    ? { borderWidth: 1.5, borderColor: colors.primary }
+                    : {}),
                 },
               ]}
             >
-              {/* Reply preview */}
+              {/* Reply preview — tap to jump to the original message */}
               {replySource ? (
-                <View
-                  style={[
+                <Pressable
+                  onPress={onReplyPress}
+                  style={({ pressed }) => [
                     styles.replyPreview,
                     {
                       borderLeftColor: isMe ? "rgba(0,0,0,0.4)" : colors.primary,
                       backgroundColor: isMe
                         ? "rgba(0,0,0,0.06)"
                         : colors.primary + "18",
+                      opacity: pressed ? 0.6 : 1,
                     },
                   ]}
                 >
@@ -1875,23 +2144,9 @@ function MessageBubble({
                     numberOfLines={2}
                     style={{ color: bubbleFg, fontSize: 12, fontFamily: fonts.bodySemi, opacity: 0.9 }}
                   >
-                    {replySource.kind === "voice"
-                      ? "🎙 Voice message"
-                      : replySource.kind === "image"
-                      ? "📷 Photo"
-                      : replySource.kind === "gif"
-                      ? "🎞️ GIF"
-                      : replySource.kind === "sticker"
-                      ? "🖼️ Sticker"
-                      : replySource.kind === "location"
-                      ? "📍 Shared location"
-                      : replySource.kind === "live_location"
-                      ? "📍 Live location"
-                      : replySource.content
-                      ? replySource.content.slice(0, 80)
-                      : "Message"}
+                    {replyPreviewLabel(replySource)}
                   </NxText>
-                </View>
+                </Pressable>
               ) : null}
 
               {/* Content */}
@@ -1910,8 +2165,14 @@ function MessageBubble({
                 <Image
                   source={{ uri: m.media! }}
                   resizeMode="cover"
-                  style={{ width: imageSize, height: imageSize, borderRadius: 14 }}
+                  style={{
+                    width: photoDims.width,
+                    height: photoDims.height,
+                    borderRadius: 14,
+                  }}
                 />
+              ) : isVideo ? (
+                <BubbleVideo uri={m.media!} dims={photoDims} />
               ) : isGif ? (
                 <Image
                   source={{ uri: m.media! }}
@@ -2065,6 +2326,7 @@ function MessageBubble({
           </Animated.View>
         ) : null}
         </Animated.View>
+        </Swipeable>
       </View>
   );
 }
@@ -2444,4 +2706,46 @@ const styles = StyleSheet.create({
     alignItems: "center",
     zIndex: 20,
   },
+  bubblePlay: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.55)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.35)",
+  },
+  swipeReplyAction: {
+    width: 62,
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 7,
+  },
+  swipeReplyIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  viewerOverlay: { flex: 1, backgroundColor: "#000" },
+  viewerTopBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    paddingHorizontal: 12,
+    paddingTop: 8,
+  },
+  viewerClose: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.12)",
+  },
+  viewerBody: { flex: 1, alignItems: "center", justifyContent: "center" },
+  viewerImage: { width: "100%", height: "100%" },
+  viewerVideo: { width: "100%", height: "100%" },
 });
