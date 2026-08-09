@@ -1010,7 +1010,7 @@ export default function ChatScreen() {
 
       {/* ── Input bar ────────────────────────────────────────────────── */}
       <KeyboardAvoidingView
-        behavior="padding"
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
         keyboardVerticalOffset={0}
       >
         {replyTo ? (

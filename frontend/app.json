@@ -23,7 +23,7 @@
       "package": "com.xyteee.nexus",
       "googleServicesFile": "./google-services.json",
       "versionCode": 13000,
-      "softwareKeyboardLayoutMode": "resize",
+      "softwareKeyboardLayoutMode": "pan",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#070709"
