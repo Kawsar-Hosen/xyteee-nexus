@@ -1,5 +1,6 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { ActivityIndicator, StyleSheet, View } from "react-native";
+import { useRouter } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
 
 import { useTheme } from "@/src/context/ThemeContext";
@@ -10,6 +11,14 @@ WebBrowser.maybeCompleteAuthSession();
 
 export default function OAuth2Redirect() {
   const { colors } = useTheme();
+  const router = useRouter();
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      router.replace("/(auth)/welcome");
+    }, 8000);
+    return () => clearTimeout(t);
+  }, [router]);
 
   return (
     <View style={styles.root}>
