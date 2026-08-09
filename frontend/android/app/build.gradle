@@ -92,8 +92,8 @@ android {
         applicationId 'com.xyteee.nexus'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 13000
-        versionName "3.10.0"
+        versionCode 13001
+        versionName "3.11.0"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
