@@ -373,6 +373,8 @@ async def _send_expo_push(to_user: str, kind: str, data: dict):
         "account_restored": "Account restored",
         "circle_message": data.get("circle_name") or "Circle message",
         "feature_update": "What's new in Nexus",
+        "reel_like": "Reel like",
+        "reel_comment": "New comment",
     }
 
     from_name = data.get("from_name") or "Someone"
@@ -396,6 +398,8 @@ async def _send_expo_push(to_user: str, kind: str, data: dict):
         "account_restored": "Your account has been restored. You can use Nexus again.",
         "circle_message": f"{from_name}: {data.get('preview') or 'Sent a message'}",
         "feature_update": "Check out the latest updates",
+        "reel_like": f"{from_name} liked your reel",
+        "reel_comment": f"{from_name}: {data.get('comment') or 'Commented on your reel'}",
     }
 
     # Call notifications use a dedicated high-priority channel and the "call"
@@ -1748,8 +1752,10 @@ async def upload_file(
         raise HTTPException(status_code=503, detail="Storage not configured")
 
     data = await file.read()
-    if len(data) > 20 * 1024 * 1024:  # 20 MB limit
-        raise HTTPException(status_code=413, detail="File too large (max 20 MB)")
+    is_video = (file.content_type or "").startswith("video/") or kind in {"video", "videos", "reel", "reels"}
+    max_bytes = 200 * 1024 * 1024 if is_video else 20 * 1024 * 1024  # 200 MB video, 20 MB other
+    if len(data) > max_bytes:
+        raise HTTPException(status_code=413, detail="File too large (max 200 MB for video, 20 MB otherwise)")
 
     ext = Path(file.filename or "file").suffix or ".bin"
     key = f"{kind}/{user['user_id']}/{make_id('file')}{ext}"
@@ -1885,6 +1891,18 @@ async def ensure_private_access(viewer_id: str, owner_id: str):
 
     if not fr.data:
         raise HTTPException(status_code=404, detail="Not found")
+
+
+async def are_friends(a: str, b: str) -> bool:
+    """True when a and b are accepted friends. Reversible-safe (sorted pair)."""
+    if a == b:
+        return True
+    fa, fb = sorted([a, b])
+    fr = await run(lambda: sb.table("friendships")
+        .select("friendship_id")
+        .eq("a", fa).eq("b", fb)
+        .limit(1).execute())
+    return bool(fr.data)
 
 
 async def ensure_not_blocked(a: str, b: str):
@@ -2122,6 +2140,116 @@ async def pin_message(message_id: str, body: PinIn, user=Depends(current_user)):
     for p in cr.data[0]["participants"]:
         await broadcast_to_user(p, {"type": "message_pin", "message": updated})
     return updated
+
+
+# ── Conversation preferences (mute / archive / pin / mark-as-read) ─────────────
+class ConvPrefIn(BaseModel):
+    conversation_id: str
+    enabled: bool = True
+
+
+async def _conv_row(conversation_id: str, me: str) -> dict:
+    try:
+        cr = await run(lambda: sb.table("conversations")
+            .select("conversation_id,participants,muted_for,archived_for,pinned_for")
+            .eq("conversation_id", conversation_id).execute())
+        row = cr.data[0]
+    except Exception:
+        cr = await run(lambda: sb.table("conversations")
+            .select("conversation_id,participants")
+            .eq("conversation_id", conversation_id).execute())
+        if not cr.data or me not in cr.data[0]["participants"]:
+            raise HTTPException(status_code=404, detail="Not found")
+        row = dict(cr.data[0])
+        row["muted_for"] = []
+        row["archived_for"] = []
+        row["pinned_for"] = []
+    if me not in row["participants"]:
+        raise HTTPException(status_code=404, detail="Not found")
+    return row
+
+
+async def _toggle_conv_field(conversation_id: str, me: str, field: str, enabled: bool) -> list:
+    row = await _conv_row(conversation_id, me)
+    cur = list(set(row.get(field) or []))
+    new_val = list(set(cur + [me])) if enabled else [p for p in cur if p != me]
+    try:
+        await run(lambda: sb.table("conversations")
+            .update({field: new_val})
+            .eq("conversation_id", conversation_id).execute())
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail="Conversation preferences not migrated yet. Run migrations_add_conversation_prefs.sql in Supabase SQL Editor.",
+        )
+    return new_val
+
+
+@api.post("/chats/{conversation_id}/mute")
+async def mute_conversation(conversation_id: str, body: ConvPrefIn, user=Depends(current_user)):
+    """Mute or unmute a conversation for me."""
+    me = user["user_id"]
+    await _toggle_conv_field(conversation_id, me, "muted_for", body.enabled)
+    await broadcast_to_user(me, {
+        "type": "conv_pref",
+        "conversation_id": conversation_id,
+        "pref": "muted",
+        "enabled": body.enabled,
+    })
+    return {"ok": True, "muted": body.enabled}
+
+
+@api.post("/chats/{conversation_id}/archive")
+async def archive_conversation(conversation_id: str, body: ConvPrefIn, user=Depends(current_user)):
+    """Archive or unarchive a conversation for me."""
+    me = user["user_id"]
+    await _toggle_conv_field(conversation_id, me, "archived_for", body.enabled)
+    await broadcast_to_user(me, {
+        "type": "conv_pref",
+        "conversation_id": conversation_id,
+        "pref": "archived",
+        "enabled": body.enabled,
+    })
+    return {"ok": True, "archived": body.enabled}
+
+
+@api.post("/chats/{conversation_id}/pin")
+async def pin_conversation(conversation_id: str, body: ConvPrefIn, user=Depends(current_user)):
+    """Pin or unpin a conversation for me."""
+    me = user["user_id"]
+    await _toggle_conv_field(conversation_id, me, "pinned_for", body.enabled)
+    await broadcast_to_user(me, {
+        "type": "conv_pref",
+        "conversation_id": conversation_id,
+        "pref": "pinned",
+        "enabled": body.enabled,
+    })
+    return {"ok": True, "pinned": body.enabled}
+
+
+@api.post("/chats/{conversation_id}/read")
+async def mark_conversation_read(conversation_id: str, user=Depends(current_user)):
+    """Mark all messages in a conversation as read for me."""
+    me = user["user_id"]
+    await _conv_row(conversation_id, me)
+    msgs_r = await run(lambda: sb.table("messages")
+        .select("message_id,read_by,deleted_for")
+        .eq("conversation_id", conversation_id)
+        .eq("deleted_for_everyone", False)
+        .execute())
+    for m in (msgs_r.data or []):
+        if me in (m.get("deleted_for") or []):
+            continue
+        rb = list(set(m.get("read_by") or []) + [me])
+        if rb != (m.get("read_by") or []):
+            await run(lambda: sb.table("messages")
+                .update({"read_by": rb})
+                .eq("message_id", m["message_id"]).execute())
+    await broadcast_to_user(me, {
+        "type": "chat_read",
+        "conversation_id": conversation_id,
+    })
+    return {"ok": True, "read": True}
 
 
 @api.get("/friends")
@@ -3295,9 +3423,19 @@ async def list_chats(user=Depends(current_user)):
     blocked_ids = await blocked_user_ids(me)
 
     # 1. Fetch all conversations for this user in one query
-    r = await run(lambda: sb.table("conversations").select("*")
-        .contains("participants", [me])
-        .order("last_message_at", desc=True).limit(200).execute())
+    pref_cols_ok = True
+    try:
+        r = await run(lambda: sb.table("conversations").select("*")
+            .contains("participants", [me])
+            .order("last_message_at", desc=True).limit(200).execute())
+    except Exception:
+        # Pref columns not migrated yet → retry without them so the app
+        # keeps working until the admin runs CHATS_MIGRATION_SQL.
+        pref_cols_ok = False
+        r = await run(lambda: sb.table("conversations")
+            .select("conversation_id,created_at,participants,last_message,last_message_at,kind,circle_name,circle_photo,circle_admins,circle_description,circle_settings,deleted_for")
+            .contains("participants", [me])
+            .order("last_message_at", desc=True).limit(200).execute())
 
     # 2. Collect all unique other-user IDs and conversation IDs
     conv_list = []
@@ -3368,6 +3506,14 @@ async def list_chats(user=Depends(current_user)):
         c["other_user"] = other_user
         c["unread"] = unread_map.get(c["conversation_id"], 0)
         c["is_bonded"] = other in bonded_ids
+        if pref_cols_ok:
+            c["muted"] = me in (c.get("muted_for") or [])
+            c["archived"] = me in (c.get("archived_for") or [])
+            c["pinned"] = me in (c.get("pinned_for") or [])
+        else:
+            c["muted"] = False
+            c["archived"] = False
+            c["pinned"] = False
 
         # Message request: a non-bonded user has messaged me and I have NOT
         # replied yet. It stays a request until I reply. Seeing it does NOT
@@ -3919,7 +4065,458 @@ async def react_to_story(story_id: str, body: StoryReactBody, user=Depends(curre
     return {"ok": True, "reaction": body.emoji}
 
 
-# ── Notifications ──────────────────────────────────────────────────────────────
+# ── Reels ───────────────────────────────────────────────────────────────────────
+class ReelCreateIn(BaseModel):
+    video_url: str = Field(min_length=1, max_length=1024)
+    thumbnail_url: Optional[str] = ""
+    caption: Optional[str] = ""
+    visibility: str = "public"   # public | friends | private
+
+
+class ReelCommentIn(BaseModel):
+    content: Optional[str] = Field(default="", max_length=500)
+    kind: str = "text"  # text | gif | sticker
+    media: Optional[str] = Field(default="", max_length=1024)
+    parent_comment_id: Optional[str] = None
+
+
+async def _can_view_reel(viewer_id: str, owner_id: str, reel: dict,
+                         owner_private: Optional[bool] = None,
+                         is_friend: Optional[bool] = None) -> bool:
+    """Visibility check mirroring stories: blocks, account privacy + reel scope."""
+    if viewer_id == owner_id:
+        return True
+    if await users_blocked(viewer_id, owner_id):
+        return False
+
+    vis = (reel.get("visibility") or "public").lower()
+    if vis == "private":
+        return False
+
+    if owner_private is None:
+        owner_private = await _user_is_private(owner_id)
+    if vis == "public" and not owner_private:
+        return True
+    if vis == "friends" or owner_private:
+        if is_friend is None:
+            return await are_friends(viewer_id, owner_id)
+        return is_friend
+    return True
+
+
+async def _user_is_private(user_id: str) -> bool:
+    r = await run(lambda: sb.table("users")
+        .select("is_private")
+        .eq("user_id", user_id)
+        .limit(1).execute())
+    return bool(r.data and r.data[0].get("is_private"))
+
+
+async def _reel_stats(me: str, reel_ids: List[str]) -> Dict[str, dict]:
+    """One-shot like/comment stats for a batch of reels (avoids N+1)."""
+    stats: Dict[str, dict] = {}
+    if not reel_ids:
+        return stats
+    for rid in reel_ids:
+        stats[rid] = {"like_count": 0, "comment_count": 0, "is_liked": False}
+
+    lr = await run(lambda: sb.table("reel_likes")
+        .select("reel_id,user_id")
+        .in_("reel_id", reel_ids).execute())
+    for row in (lr.data or []):
+        st = stats.get(row["reel_id"])
+        if not st:
+            continue
+        st["like_count"] += 1
+        if row["user_id"] == me:
+            st["is_liked"] = True
+
+    cr = await run(lambda: sb.table("reel_comments")
+        .select("reel_id,comment_id")
+        .in_("reel_id", reel_ids).execute())
+    for row in (cr.data or []):
+        st = stats.get(row["reel_id"])
+        if st:
+            st["comment_count"] += 1
+    return stats
+
+
+async def _reel_with_meta(reel: dict, me: str, umap: Optional[Dict[str, Any]] = None) -> dict:
+    """Augment a reel row with author and viewer state."""
+    owner_id = reel["user_id"]
+    author = None
+    if umap and umap.get(owner_id):
+        author = umap.get(owner_id)
+    elif not umap:
+        ur = await run(lambda: sb.table("users").select("*").eq("user_id", owner_id).execute())
+        author = public_user(ur.data[0]) if ur.data else None
+
+    stats = await _reel_stats(me, [reel["reel_id"]])
+
+    return {
+        "reel_id": reel["reel_id"],
+        "user_id": owner_id,
+        "author": author,
+        "video_url": reel["video_url"],
+        "thumbnail_url": reel.get("thumbnail_url") or "",
+        "caption": reel.get("caption") or "",
+        "visibility": reel.get("visibility") or "public",
+        "view_count": int(reel.get("view_count") or 0),
+        "like_count": stats[reel["reel_id"]]["like_count"],
+        "comment_count": stats[reel["reel_id"]]["comment_count"],
+        "is_liked": stats[reel["reel_id"]]["is_liked"],
+        "created_at": reel["created_at"],
+        "is_mine": owner_id == me,
+    }
+
+
+@api.post("/reels")
+async def create_reel(body: ReelCreateIn, user=Depends(current_user)):
+    vis = (body.visibility or "public").lower()
+    if vis not in {"public", "friends", "private"}:
+        raise HTTPException(status_code=400, detail="Invalid visibility")
+    reel_id = make_id("rel")
+    doc = {
+        "reel_id": reel_id,
+        "user_id": user["user_id"],
+        "video_url": body.video_url,
+        "thumbnail_url": (body.thumbnail_url or "").strip(),
+        "caption": (body.caption or "").strip()[:300],
+        "visibility": vis,
+        "view_count": 0,
+        "created_at": ts(now_utc()),
+    }
+    await run(lambda: sb.table("reels").insert(doc).execute())
+
+    # Notify friends that a new reel is live (only if public enough to matter).
+    if vis in {"public", "friends"}:
+        fr = await run(lambda: sb.table("friendships").select("a,b")
+            .or_(f"a.eq.{user['user_id']},b.eq.{user['user_id']}").execute())
+        for f in (fr.data or []):
+            other = f["a"] if f["b"] == user["user_id"] else f["b"]
+            await broadcast_to_user(other, {
+                "type": "reel_new",
+                "reel_id": reel_id,
+                "user_id": user["user_id"],
+            })
+
+    reel = await run(lambda: sb.table("reels").select("*").eq("reel_id", reel_id).execute())
+    out = await _reel_with_meta(reel.data[0], user["user_id"], umap={user["user_id"]: user})
+    return out
+
+
+@api.get("/reels/feed")
+async def reels_feed(
+    limit: int = Query(10, ge=1, le=50),
+    offset: int = Query(0, ge=0),
+    user=Depends(current_user),
+):
+    """Paginated TikTok-style reel feed. Newest first."""
+    me = user["user_id"]
+    cached = _get_cached(f"/reels/feed:{limit}:{offset}", ttl=6)
+    if cached is not None:
+        return cached
+
+    rr = await run(lambda: sb.table("reels")
+        .select("*")
+        .order("created_at", desc=True)
+        .range(offset, offset + limit - 1).execute())
+
+    rows = [r for r in (rr.data or [])]
+    blocked = await blocked_user_ids(me)
+
+    allowed: List[dict] = []
+    owner_ids: Set[str] = set()
+    for r in rows:
+        owner = r["user_id"]
+        if owner in blocked:
+            continue
+        try:
+            if await _can_view_reel(me, owner, r):
+                allowed.append(r)
+                owner_ids.add(owner)
+        except HTTPException:
+            continue
+
+    if not allowed:
+        result = {"reels": [], "has_more": len(rows) == limit}
+        _set_cached(f"/reels/feed:{limit}:{offset}", result, ttl=6)
+        return result
+
+    ur = await run(lambda: sb.table("users").select("*").in_("user_id", list(owner_ids)).execute())
+    umap = {u["user_id"]: public_user(u) for u in (ur.data or [])}
+    umap[me] = user
+
+    stats = await _reel_stats(me, [r["reel_id"] for r in allowed])
+
+    out = []
+    for r in allowed:
+        st = stats.get(r["reel_id"], {"like_count": 0, "comment_count": 0, "is_liked": False})
+        out.append({
+            "reel_id": r["reel_id"],
+            "user_id": r["user_id"],
+            "author": umap.get(r["user_id"]),
+            "video_url": r["video_url"],
+            "thumbnail_url": r.get("thumbnail_url") or "",
+            "caption": r.get("caption") or "",
+            "visibility": r.get("visibility") or "public",
+            "view_count": int(r.get("view_count") or 0),
+            "like_count": st["like_count"],
+            "comment_count": st["comment_count"],
+            "is_liked": st["is_liked"],
+            "created_at": r["created_at"],
+            "is_mine": r["user_id"] == me,
+        })
+
+    result = {"reels": out, "has_more": len(rows) == limit}
+    _set_cached(f"/reels/feed:{limit}:{offset}", result, ttl=6)
+    return result
+
+
+@api.get("/reels/user/{target_id}")
+async def user_reels(target_id: str, user=Depends(current_user)):
+    """Reels gallery for a user's profile. Honors the same visibility rules."""
+    me = user["user_id"]
+    cached = _get_cached(f"/reels/user:{target_id}", ttl=6)
+    if cached is not None:
+        return cached
+
+    if await users_blocked(me, target_id):
+        raise HTTPException(status_code=404, detail="Not found")
+
+    rr = await run(lambda: sb.table("reels")
+        .select("*")
+        .eq("user_id", target_id)
+        .order("created_at", desc=True)
+        .limit(50).execute())
+
+    rows = [r for r in (rr.data or []) if await _can_view_reel(me, target_id, r)]
+
+    ur = await run(lambda: sb.table("users").select("*").eq("user_id", target_id).execute())
+    umap = {target_id: public_user(ur.data[0]) if ur.data else None}
+    umap[me] = user
+
+    stats = await _reel_stats(me, [r["reel_id"] for r in rows])
+
+    out = []
+    for r in rows:
+        st = stats.get(r["reel_id"], {"like_count": 0, "comment_count": 0, "is_liked": False})
+        out.append({
+            "reel_id": r["reel_id"],
+            "user_id": r["user_id"],
+            "author": umap.get(r["user_id"]),
+            "video_url": r["video_url"],
+            "thumbnail_url": r.get("thumbnail_url") or "",
+            "caption": r.get("caption") or "",
+            "visibility": r.get("visibility") or "public",
+            "view_count": int(r.get("view_count") or 0),
+            "like_count": st["like_count"],
+            "comment_count": st["comment_count"],
+            "is_liked": st["is_liked"],
+            "created_at": r["created_at"],
+            "is_mine": r["user_id"] == me,
+        })
+
+    result = {"reels": out, "user": umap.get(target_id)}
+    _set_cached(f"/reels/user:{target_id}", result, ttl=6)
+    return result
+
+
+async def _load_reel(reel_id: str, me: str) -> dict:
+    rr = await run(lambda: sb.table("reels").select("*").eq("reel_id", reel_id).execute())
+    if not rr.data:
+        raise HTTPException(status_code=404, detail="Not found")
+    reel = rr.data[0]
+    if not await _can_view_reel(me, reel["user_id"], reel):
+        raise HTTPException(status_code=404, detail="Not found")
+    return reel
+
+
+@api.post("/reels/{reel_id}/view")
+async def view_reel(reel_id: str, user=Depends(current_user)):
+    reel = await _load_reel(reel_id, user["user_id"])
+    await run(lambda: sb.table("reels")
+        .update({"view_count": int(reel.get("view_count") or 0) + 1})
+        .eq("reel_id", reel_id).execute())
+    _invalidate_user_cache(user["user_id"])
+    return {"ok": True}
+
+
+@api.post("/reels/{reel_id}/like")
+async def like_reel(reel_id: str, user=Depends(current_user)):
+    reel = await _load_reel(reel_id, user["user_id"])
+    try:
+        await run(lambda: sb.table("reel_likes").insert({
+            "reel_id": reel_id,
+            "user_id": user["user_id"],
+            "created_at": ts(now_utc()),
+        }).execute())
+    except Exception:
+        # Already liked — idempotent.
+        pass
+    else:
+        if reel["user_id"] != user["user_id"]:
+            await broadcast_to_user(reel["user_id"], {
+                "type": "reel_like",
+                "reel_id": reel_id,
+                "user_id": user["user_id"],
+                "from_name": user.get("display_name", ""),
+                "liked": True,
+            })
+            await _push_notification(reel["user_id"], "reel_like", {
+                "from": user["user_id"],
+                "from_name": user.get("display_name", ""),
+                "reel_id": reel_id,
+            })
+    return {"ok": True, "liked": True}
+
+
+@api.delete("/reels/{reel_id}/like")
+async def unlike_reel(reel_id: str, user=Depends(current_user)):
+    await _load_reel(reel_id, user["user_id"])
+    await run(lambda: sb.table("reel_likes")
+        .delete()
+        .eq("reel_id", reel_id)
+        .eq("user_id", user["user_id"]).execute())
+    return {"ok": True, "liked": False}
+
+
+@api.get("/reels/{reel_id}/likes")
+async def reel_likes(reel_id: str, user=Depends(current_user)):
+    reel = await _load_reel(reel_id, user["user_id"])
+    lr = await run(lambda: sb.table("reel_likes")
+        .select("user_id")
+        .eq("reel_id", reel_id)
+        .order("created_at", desc=True)
+        .limit(50).execute())
+    ids = [x["user_id"] for x in (lr.data or [])]
+    users: List[Any] = []
+    if ids:
+        ur = await run(lambda: sb.table("users").select("*").in_("user_id", ids).execute())
+        umap = {u["user_id"]: public_user(u) for u in (ur.data or [])}
+        users = [umap.get(i) for i in ids if umap.get(i)]
+    return {"likes": users, "count": len(users)}
+
+
+@api.post("/reels/{reel_id}/comments")
+async def add_reel_comment(reel_id: str, body: ReelCommentIn, user=Depends(current_user)):
+    reel = await _load_reel(reel_id, user["user_id"])
+    comment_id = make_id("cmt")
+    kind = (body.kind or "text").lower()
+    if kind not in {"text", "gif", "sticker"}:
+        raise HTTPException(status_code=400, detail="Invalid comment kind")
+    content = (body.content or "").strip()[:500]
+    media = (body.media or "").strip()[:1024]
+    if kind == "text" and not content:
+        raise HTTPException(status_code=400, detail="Comment cannot be empty")
+    if kind in {"gif", "sticker"} and not media:
+        raise HTTPException(status_code=400, detail="Media is required")
+
+    parent_comment_id = body.parent_comment_id
+    if parent_comment_id:
+        pr = await run(lambda: sb.table("reel_comments")
+            .select("comment_id,reel_id")
+            .eq("comment_id", parent_comment_id)
+            .eq("reel_id", reel_id)
+            .limit(1).execute())
+        if not pr.data:
+            raise HTTPException(status_code=404, detail="Parent comment not found")
+
+    doc = {
+        "comment_id": comment_id,
+        "reel_id": reel_id,
+        "user_id": user["user_id"],
+        "content": content,
+        "kind": kind,
+        "media": media,
+        "parent_comment_id": parent_comment_id,
+        "created_at": ts(now_utc()),
+    }
+    await run(lambda: sb.table("reel_comments").insert(doc).execute())
+
+    out = {
+        "comment_id": comment_id,
+        "reel_id": reel_id,
+        "user_id": user["user_id"],
+        "user": user,
+        "content": content,
+        "kind": kind,
+        "media": media,
+        "parent_comment_id": parent_comment_id,
+        "created_at": doc["created_at"],
+        "is_mine": True,
+    }
+
+    if reel["user_id"] != user["user_id"]:
+        await broadcast_to_user(reel["user_id"], {
+            "type": "reel_comment",
+            "reel_id": reel_id,
+            "comment": out,
+        })
+        await _push_notification(reel["user_id"], "reel_comment", {
+            "from": user["user_id"],
+            "from_name": user.get("display_name", ""),
+            "reel_id": reel_id,
+            "comment": content or ("GIF" if kind == "gif" else "Sticker"),
+        })
+
+    return out
+
+
+@api.get("/reels/{reel_id}/comments")
+async def reel_comments(reel_id: str, user=Depends(current_user)):
+    await _load_reel(reel_id, user["user_id"])
+    cr = await run(lambda: sb.table("reel_comments")
+        .select("*")
+        .eq("reel_id", reel_id)
+        .order("created_at", desc=False)
+        .limit(100).execute())
+    rows = cr.data or []
+    ids = {r["user_id"] for r in rows}
+    umap: Dict[str, Any] = {}
+    if ids:
+        ur = await run(lambda: sb.table("users").select("*").in_("user_id", list(ids)).execute())
+        umap = {u["user_id"]: public_user(u) for u in (ur.data or [])}
+    out = [{
+        "comment_id": r["comment_id"],
+        "reel_id": r["reel_id"],
+        "user_id": r["user_id"],
+        "user": umap.get(r["user_id"]),
+        "content": r["content"],
+        "kind": r.get("kind") or "text",
+        "media": r.get("media") or "",
+        "parent_comment_id": r.get("parent_comment_id"),
+        "created_at": r["created_at"],
+        "is_mine": r["user_id"] == user["user_id"],
+    } for r in rows]
+    return {"comments": out}
+
+
+@api.delete("/reels/{reel_id}/comments/{comment_id}")
+async def delete_reel_comment(reel_id: str, comment_id: str, user=Depends(current_user)):
+    cr = await run(lambda: sb.table("reel_comments")
+        .select("comment_id,user_id")
+        .eq("comment_id", comment_id)
+        .execute())
+    if not cr.data:
+        raise HTTPException(status_code=404, detail="Not found")
+    if cr.data[0]["user_id"] != user["user_id"]:
+        raise HTTPException(status_code=403, detail="Not allowed")
+    await run(lambda: sb.table("reel_comments").delete().eq("comment_id", comment_id).execute())
+    return {"ok": True}
+
+
+@api.delete("/reels/{reel_id}")
+async def delete_reel(reel_id: str, user=Depends(current_user)):
+    rr = await run(lambda: sb.table("reels").select("reel_id,user_id").eq("reel_id", reel_id).execute())
+    if not rr.data or rr.data[0]["user_id"] != user["user_id"]:
+        raise HTTPException(status_code=403, detail="Not allowed")
+    await run(lambda: sb.table("reels").delete().eq("reel_id", reel_id).execute())
+    _invalidate_user_cache(user["user_id"])
+    return {"ok": True}
+
+
+
 @api.get("/notifications")
 async def list_notifications(user=Depends(current_user)):
     r = await run(lambda: sb.table("notifications").select("*")
@@ -4581,6 +5178,9 @@ REPORTS_MIGRATION_SQL = (
 
 CHATS_MIGRATION_SQL = (
     "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS deleted_for TEXT[] DEFAULT '{}';\n"
+    "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS muted_for TEXT[] DEFAULT '{}';\n"
+    "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS archived_for TEXT[] DEFAULT '{}';\n"
+    "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS pinned_for TEXT[] DEFAULT '{}';\n"
     "ALTER TABLE messages ADD COLUMN IF NOT EXISTS pinned_for TEXT[] DEFAULT '{}';"
 )
 
@@ -5391,7 +5991,7 @@ async def startup():
         )
     # Ensure chat realtime columns exist (conversations.deleted_for, messages.pinned_for)
     try:
-        await run(lambda: sb.table("conversations").select("deleted_for").limit(1).execute())
+        await run(lambda: sb.table("conversations").select("deleted_for,muted_for,archived_for,pinned_for").limit(1).execute())
         await run(lambda: sb.table("messages").select("pinned_for").limit(1).execute())
         logger.info("chat realtime columns ✅")
     except Exception:
@@ -5568,4 +6168,3 @@ async def ai_chat(body: AiChatRequest):
 
 # Include API router only after every @api route has been registered.
 app.include_router(api)
-

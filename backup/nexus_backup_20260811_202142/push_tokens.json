@@ -1,0 +1,37 @@
+[
+ {
+  "user_id": "usr_7c0b1fa2e71e4be5",
+  "expo_push_token": "ExponentPushToken[DrWY6rPTJfJCnMLGQGGEYH]",
+  "device_name": "",
+  "created_at": "2026-07-11T14:47:49.942056+00:00",
+  "updated_at": "2026-07-12T13:01:40.469087+00:00"
+ },
+ {
+  "user_id": "52972753017",
+  "expo_push_token": "ExponentPushToken[DOfO5zAbUjEzOxcGYQnyLR]",
+  "device_name": "",
+  "created_at": "2026-08-09T05:58:10.442595+00:00",
+  "updated_at": "2026-08-10T06:51:45.184447+00:00"
+ },
+ {
+  "user_id": "usr_c2b11bc7ac8f4799",
+  "expo_push_token": "ExponentPushToken[VmuUEiJF-XZtDKZrqtlucR]",
+  "device_name": "",
+  "created_at": "2026-08-10T05:32:59.325065+00:00",
+  "updated_at": "2026-08-10T13:46:22.646335+00:00"
+ },
+ {
+  "user_id": "52972753010",
+  "expo_push_token": "ExponentPushToken[ftOq7CC0VkOKemQECfl4gI]",
+  "device_name": "",
+  "created_at": "2026-08-08T06:45:43.488228+00:00",
+  "updated_at": "2026-08-11T08:31:38.892298+00:00"
+ },
+ {
+  "user_id": "usr_f4db4462fcad439b",
+  "expo_push_token": "ExponentPushToken[eEwBY7OiiMlK5Q3uEyp_pB]",
+  "device_name": "",
+  "created_at": "2026-08-05T10:41:16.429377+00:00",
+  "updated_at": "2026-08-05T10:47:40.93873+00:00"
+ }
+]

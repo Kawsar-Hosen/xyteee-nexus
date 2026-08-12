@@ -1,0 +1,21 @@
+NEXUS SUPABASE BACKUP REPORT
+generated: 2026-08-11T20:21:42.531622
+project  : https://ruikwtvdxyumfecfdlvo.supabase.co
+
+users                      43 rows
+user_sessions               0 rows
+friend_requests            87 rows
+friendships                31 rows
+blocks                      0 rows
+conversations              72 rows
+messages                  475 rows
+circles                     2 rows
+circle_members              3 rows
+circle_invites              0 rows
+circle_join_requests        0 rows
+circle_messages             6 rows
+stories                    24 rows
+notifications             567 rows
+reports                     0 rows
+appeals                     3 rows
+push_tokens                 5 rows

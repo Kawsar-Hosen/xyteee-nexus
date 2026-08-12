@@ -1,0 +1,188 @@
+[
+ {
+  "friendship_id": "frn_41f5e84bef6049fd",
+  "a": "52972752990",
+  "b": "usr_c2b11bc7ac8f4799",
+  "created_at": "2026-08-07T18:42:35.288507+00:00"
+ },
+ {
+  "friendship_id": "frn_cd2d85ae46844723",
+  "a": "52972753004",
+  "b": "usr_c2b11bc7ac8f4799",
+  "created_at": "2026-08-07T19:24:43.994666+00:00"
+ },
+ {
+  "friendship_id": "frn_9124bd1b8a744b63",
+  "a": "52972753004",
+  "b": "usr_7c0b1fa2e71e4be5",
+  "created_at": "2026-08-08T05:31:59.907777+00:00"
+ },
+ {
+  "friendship_id": "frn_91a721c512424e8a",
+  "a": "usr_51dbbb65356849f9",
+  "b": "usr_7c0b1fa2e71e4be5",
+  "created_at": "2026-08-08T05:32:00.454436+00:00"
+ },
+ {
+  "friendship_id": "frn_0bd62b0226cb46cf",
+  "a": "52972753009",
+  "b": "usr_7c0b1fa2e71e4be5",
+  "created_at": "2026-08-08T05:32:02.178786+00:00"
+ },
+ {
+  "friendship_id": "frn_0f95b2d7c9294c40",
+  "a": "52972752999",
+  "b": "usr_7c0b1fa2e71e4be5",
+  "created_at": "2026-08-08T05:32:05.070305+00:00"
+ },
+ {
+  "friendship_id": "frn_4e00b09f01124f75",
+  "a": "usr_7c0b1fa2e71e4be5",
+  "b": "usr_f4db4462fcad439b",
+  "created_at": "2026-08-08T05:32:13.070228+00:00"
+ },
+ {
+  "friendship_id": "frn_f6a0009150894bed",
+  "a": "52972753000",
+  "b": "usr_7c0b1fa2e71e4be5",
+  "created_at": "2026-08-08T05:32:13.982217+00:00"
+ },
+ {
+  "friendship_id": "frn_b7fe9dcf891a467f",
+  "a": "52972753007",
+  "b": "usr_c2b11bc7ac8f4799",
+  "created_at": "2026-08-08T05:39:59.457955+00:00"
+ },
+ {
+  "friendship_id": "frn_e213268fc37f4322",
+  "a": "52972753009",
+  "b": "usr_c2b11bc7ac8f4799",
+  "created_at": "2026-08-08T05:40:54.321182+00:00"
+ },
+ {
+  "friendship_id": "frn_7fe12c566446441d",
+  "a": "52972753010",
+  "b": "usr_c2b11bc7ac8f4799",
+  "created_at": "2026-08-08T06:49:50.748128+00:00"
+ },
+ {
+  "friendship_id": "frn_a8a5c324af3c4ba5",
+  "a": "52972753013",
+  "b": "usr_c2b11bc7ac8f4799",
+  "created_at": "2026-08-08T11:02:29.808779+00:00"
+ },
+ {
+  "friendship_id": "frn_6e363cbe03794c1f",
+  "a": "52972753017",
+  "b": "usr_c2b11bc7ac8f4799",
+  "created_at": "2026-08-09T06:01:14.22006+00:00"
+ },
+ {
+  "friendship_id": "frn_8bd6dc34eb4b4f4c",
+  "a": "usr_0e5cff44c32b4c5b",
+  "b": "usr_7fa55d15df1f4e3a",
+  "created_at": "2026-07-08T17:18:12.068526+00:00"
+ },
+ {
+  "friendship_id": "frn_d1c3d79ba32740be",
+  "a": "usr_0e5cff44c32b4c5b",
+  "b": "usr_9b125931e3ec4b93",
+  "created_at": "2026-07-08T17:18:13.412185+00:00"
+ },
+ {
+  "friendship_id": "frn_adc95ce2ef374a8d",
+  "a": "usr_4a065520b0f04a0a",
+  "b": "usr_983cbfb567f64b9c",
+  "created_at": "2026-07-08T17:23:03.165444+00:00"
+ },
+ {
+  "friendship_id": "frn_3cd8ee4133624891",
+  "a": "usr_0e5cff44c32b4c5b",
+  "b": "usr_983cbfb567f64b9c",
+  "created_at": "2026-07-08T17:23:06.163473+00:00"
+ },
+ {
+  "friendship_id": "frn_d20b5fdd6dc34c49",
+  "a": "usr_0e5cff44c32b4c5b",
+  "b": "usr_4a065520b0f04a0a",
+  "created_at": "2026-07-08T17:25:04.742934+00:00"
+ },
+ {
+  "friendship_id": "frn_c8405de1b0f944b2",
+  "a": "usr_7fa55d15df1f4e3a",
+  "b": "usr_fe72aca7e98041c3",
+  "created_at": "2026-07-09T02:35:46.623598+00:00"
+ },
+ {
+  "friendship_id": "frn_7e3b0a9d7b69451b",
+  "a": "usr_6c8df9c644ff4bc4",
+  "b": "usr_fe72aca7e98041c3",
+  "created_at": "2026-07-09T02:35:47.088545+00:00"
+ },
+ {
+  "friendship_id": "frn_bfece732ff46469e",
+  "a": "usr_0e5cff44c32b4c5b",
+  "b": "usr_6c8df9c644ff4bc4",
+  "created_at": "2026-07-09T06:04:00.598594+00:00"
+ },
+ {
+  "friendship_id": "frn_c4e47f74002f4194",
+  "a": "usr_0e5cff44c32b4c5b",
+  "b": "usr_fe72aca7e98041c3",
+  "created_at": "2026-07-09T06:04:02.230791+00:00"
+ },
+ {
+  "friendship_id": "frn_63331190fe504de5",
+  "a": "usr_6c8df9c644ff4bc4",
+  "b": "usr_983cbfb567f64b9c",
+  "created_at": "2026-07-09T10:04:47.306409+00:00"
+ },
+ {
+  "friendship_id": "frn_82ed78b679b142bb",
+  "a": "usr_6c8df9c644ff4bc4",
+  "b": "usr_ac3bf3dc191f4f50",
+  "created_at": "2026-07-10T19:23:41.19013+00:00"
+ },
+ {
+  "friendship_id": "frn_a0e10f61ba9e4a11",
+  "a": "usr_b4790fc6da4e426a",
+  "b": "usr_c2b11bc7ac8f4799",
+  "created_at": "2026-07-11T09:53:14.572643+00:00"
+ },
+ {
+  "friendship_id": "frn_9b9fd0e36e7a4bce",
+  "a": "usr_765122601ce24e9c",
+  "b": "usr_7c0b1fa2e71e4be5",
+  "created_at": "2026-07-11T15:15:19.925477+00:00"
+ },
+ {
+  "friendship_id": "frn_9d04fa9e2f9c4710",
+  "a": "usr_51dbbb65356849f9",
+  "b": "usr_c2b11bc7ac8f4799",
+  "created_at": "2026-08-03T12:56:42.627376+00:00"
+ },
+ {
+  "friendship_id": "frn_b8fa8055138d41c5",
+  "a": "usr_c2b11bc7ac8f4799",
+  "b": "usr_e49ab13f4cc64590",
+  "created_at": "2026-08-05T07:04:16.616073+00:00"
+ },
+ {
+  "friendship_id": "frn_c2171ead94e54506",
+  "a": "usr_c2b11bc7ac8f4799",
+  "b": "usr_f4db4462fcad439b",
+  "created_at": "2026-08-05T10:43:03.231369+00:00"
+ },
+ {
+  "friendship_id": "frn_95c01f2c4d4e409a",
+  "a": "52972752990",
+  "b": "52972752999",
+  "created_at": "2026-08-07T13:53:37.869248+00:00"
+ },
+ {
+  "friendship_id": "frn_e08f602ff6a940bb",
+  "a": "52972752999",
+  "b": "usr_c2b11bc7ac8f4799",
+  "created_at": "2026-08-07T14:01:11.722392+00:00"
+ }
+]

@@ -27,6 +27,13 @@ export type WsEvent =
   | { type: "live_location_update"; conversation_id: string; message_id: string; user_id: string; content: string }
   | { type: "live_location_end"; conversation_id: string; message_id: string; user_id: string; content: string }
   | { type: "chat_cleared"; conversation_id: string }
+  | {
+      type: "conv_pref";
+      conversation_id: string;
+      pref: "muted" | "archived" | "pinned";
+      enabled: boolean;
+    }
+  | { type: "chat_read"; conversation_id: string }
   | { type: "conversation_deleted"; conversation_id: string; deleted_by: string }
   | { type: "blocked"; by_user_id: string }
   | { type: "typing"; conversation_id: string; user_id: string; is_typing: boolean }
@@ -47,6 +54,9 @@ export type WsEvent =
     }
   | { type: "notification"; notification: any }
   | { type: "story_new"; story_id: string; user_id: string }
+  | { type: "reel_new"; reel_id: string; user_id: string }
+  | { type: "reel_like"; reel_id: string; user_id: string; from_name: string; liked: boolean }
+  | { type: "reel_comment"; reel_id: string; comment: any }
   | { type: "pong" };
 
 type Listener = (e: WsEvent) => void;

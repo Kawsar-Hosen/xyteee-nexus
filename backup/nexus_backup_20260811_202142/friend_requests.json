@@ -1,0 +1,698 @@
+[
+ {
+  "request_id": "frq_e3cd288b14e54545",
+  "from_user": "usr_6c8df9c644ff4bc4",
+  "to_user": "usr_4a065520b0f04a0a",
+  "status": "pending",
+  "created_at": "2026-07-08T21:37:15.414595+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_d0f3f821c258413d",
+  "from_user": "usr_c2b11bc7ac8f4799",
+  "to_user": "usr_51dbbb65356849f9",
+  "status": "accepted",
+  "created_at": "2026-08-03T12:55:40.818533+00:00",
+  "resolved_at": "2026-08-03T12:56:42.51524+00:00"
+ },
+ {
+  "request_id": "frq_ca4b19d79bd64516",
+  "from_user": "usr_6c8df9c644ff4bc4",
+  "to_user": "usr_7fa55d15df1f4e3a",
+  "status": "pending",
+  "created_at": "2026-07-08T21:37:20.484666+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_165520891f7c4c58",
+  "from_user": "usr_6c8df9c644ff4bc4",
+  "to_user": "usr_9b125931e3ec4b93",
+  "status": "pending",
+  "created_at": "2026-07-08T21:37:21.570465+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_3734635ba8d14ae1",
+  "from_user": "52972752990",
+  "to_user": "usr_c2b11bc7ac8f4799",
+  "status": "accepted",
+  "created_at": "2026-08-07T18:37:14.991975+00:00",
+  "resolved_at": "2026-08-07T18:42:35.027895+00:00"
+ },
+ {
+  "request_id": "frq_8894fa95f255469b",
+  "from_user": "52972753004",
+  "to_user": "usr_765122601ce24e9c",
+  "status": "pending",
+  "created_at": "2026-08-07T19:21:38.663838+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_681270cac54f4599",
+  "from_user": "usr_7fa55d15df1f4e3a",
+  "to_user": "usr_fe72aca7e98041c3",
+  "status": "accepted",
+  "created_at": "2026-07-08T16:35:53.752491+00:00",
+  "resolved_at": "2026-07-09T02:35:46.374082+00:00"
+ },
+ {
+  "request_id": "frq_5059d8fb73d74d57",
+  "from_user": "usr_6c8df9c644ff4bc4",
+  "to_user": "usr_fe72aca7e98041c3",
+  "status": "accepted",
+  "created_at": "2026-07-08T21:37:25.706777+00:00",
+  "resolved_at": "2026-07-09T02:35:46.931901+00:00"
+ },
+ {
+  "request_id": "frq_6101b643dda543e2",
+  "from_user": "52972753004",
+  "to_user": "usr_b4790fc6da4e426a",
+  "status": "pending",
+  "created_at": "2026-08-07T19:21:40.430966+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_d50b22aefa744157",
+  "from_user": "usr_6c8df9c644ff4bc4",
+  "to_user": "usr_0e5cff44c32b4c5b",
+  "status": "accepted",
+  "created_at": "2026-07-08T21:37:22.311482+00:00",
+  "resolved_at": "2026-07-09T06:04:00.328073+00:00"
+ },
+ {
+  "request_id": "frq_9fe87fd8f4cc4951",
+  "from_user": "usr_fe72aca7e98041c3",
+  "to_user": "usr_0e5cff44c32b4c5b",
+  "status": "accepted",
+  "created_at": "2026-07-09T02:36:25.608716+00:00",
+  "resolved_at": "2026-07-09T06:04:02.095095+00:00"
+ },
+ {
+  "request_id": "frq_f48df1760dce40d1",
+  "from_user": "usr_51dbbb65356849f9",
+  "to_user": "usr_765122601ce24e9c",
+  "status": "pending",
+  "created_at": "2026-08-03T15:04:16.784098+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_4e10780aed524357",
+  "from_user": "usr_6c8df9c644ff4bc4",
+  "to_user": "usr_983cbfb567f64b9c",
+  "status": "accepted",
+  "created_at": "2026-07-08T21:37:18.928113+00:00",
+  "resolved_at": "2026-07-09T10:04:46.82521+00:00"
+ },
+ {
+  "request_id": "frq_e7e44ba301ef4157",
+  "from_user": "52972753004",
+  "to_user": "52972753002",
+  "status": "pending",
+  "created_at": "2026-08-07T19:23:09.992353+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_52e3861916184e63",
+  "from_user": "52972753004",
+  "to_user": "usr_51dbbb65356849f9",
+  "status": "pending",
+  "created_at": "2026-08-07T19:23:20.09152+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_be5bd5665663459c",
+  "from_user": "52972753004",
+  "to_user": "usr_fe72aca7e98041c3",
+  "status": "pending",
+  "created_at": "2026-08-07T19:23:29.546926+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_1214e43e812c471a",
+  "from_user": "52972753004",
+  "to_user": "usr_c2b11bc7ac8f4799",
+  "status": "accepted",
+  "created_at": "2026-08-07T19:21:42.882343+00:00",
+  "resolved_at": "2026-08-07T19:24:43.787161+00:00"
+ },
+ {
+  "request_id": "frq_b8820ee05c854706",
+  "from_user": "usr_c2b11bc7ac8f4799",
+  "to_user": "52972753005",
+  "status": "pending",
+  "created_at": "2026-08-08T03:57:53.830017+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_5afd871bf1e8435d",
+  "from_user": "52972753005",
+  "to_user": "52972753007",
+  "status": "pending",
+  "created_at": "2026-08-08T04:21:15.280194+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_5a2e234236f14b3b",
+  "from_user": "usr_6c8df9c644ff4bc4",
+  "to_user": "usr_ac3bf3dc191f4f50",
+  "status": "accepted",
+  "created_at": "2026-07-08T21:37:17.680002+00:00",
+  "resolved_at": "2026-07-10T19:23:41.078022+00:00"
+ },
+ {
+  "request_id": "frq_d66be4ebf647499d",
+  "from_user": "52972753005",
+  "to_user": "52972753006",
+  "status": "pending",
+  "created_at": "2026-08-08T04:21:15.808465+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_e56bf8cb1e504c6f",
+  "from_user": "52972753005",
+  "to_user": "52972753004",
+  "status": "pending",
+  "created_at": "2026-08-08T04:21:24.737976+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_24e3af821a784cf1",
+  "from_user": "52972753005",
+  "to_user": "usr_e49ab13f4cc64590",
+  "status": "pending",
+  "created_at": "2026-08-08T04:21:40.497562+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_b7d97f1b7d624337",
+  "from_user": "52972753005",
+  "to_user": "usr_765122601ce24e9c",
+  "status": "pending",
+  "created_at": "2026-08-08T04:21:52.568057+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_c67b1e6f579c4a52",
+  "from_user": "52972753005",
+  "to_user": "usr_b4790fc6da4e426a",
+  "status": "pending",
+  "created_at": "2026-08-08T04:21:53.824275+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_4ec2b8f042ad4a3e",
+  "from_user": "52972753009",
+  "to_user": "usr_765122601ce24e9c",
+  "status": "pending",
+  "created_at": "2026-08-08T04:25:19.621234+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_f6a29219b25e4012",
+  "from_user": "usr_c2b11bc7ac8f4799",
+  "to_user": "usr_e49ab13f4cc64590",
+  "status": "accepted",
+  "created_at": "2026-08-05T07:04:01.66882+00:00",
+  "resolved_at": "2026-08-05T07:04:16.514954+00:00"
+ },
+ {
+  "request_id": "frq_efc67d462cbe49dd",
+  "from_user": "52972753004",
+  "to_user": "usr_7c0b1fa2e71e4be5",
+  "status": "accepted",
+  "created_at": "2026-08-07T19:21:45.185676+00:00",
+  "resolved_at": "2026-08-08T05:31:59.608663+00:00"
+ },
+ {
+  "request_id": "frq_c067b57378574d1f",
+  "from_user": "usr_f4db4462fcad439b",
+  "to_user": "usr_765122601ce24e9c",
+  "status": "pending",
+  "created_at": "2026-08-05T10:42:31.7647+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_b9f03a9d828a495b",
+  "from_user": "usr_f4db4462fcad439b",
+  "to_user": "usr_c2b11bc7ac8f4799",
+  "status": "accepted",
+  "created_at": "2026-08-05T10:42:20.696543+00:00",
+  "resolved_at": "2026-08-05T10:43:03.094075+00:00"
+ },
+ {
+  "request_id": "frq_dc3563048abd490d",
+  "from_user": "usr_b4790fc6da4e426a",
+  "to_user": "usr_c2b11bc7ac8f4799",
+  "status": "accepted",
+  "created_at": "2026-07-11T09:53:02.135241+00:00",
+  "resolved_at": "2026-07-11T09:53:14.478493+00:00"
+ },
+ {
+  "request_id": "frq_399f8f8ac8ea4b99",
+  "from_user": "usr_51dbbb65356849f9",
+  "to_user": "usr_7c0b1fa2e71e4be5",
+  "status": "accepted",
+  "created_at": "2026-08-03T15:04:00.762529+00:00",
+  "resolved_at": "2026-08-08T05:32:00.039995+00:00"
+ },
+ {
+  "request_id": "frq_b87fb0b3cf284416",
+  "from_user": "52972753009",
+  "to_user": "usr_7c0b1fa2e71e4be5",
+  "status": "accepted",
+  "created_at": "2026-08-08T04:25:20.715116+00:00",
+  "resolved_at": "2026-08-08T05:32:01.97372+00:00"
+ },
+ {
+  "request_id": "frq_5575ffc4b51648d1",
+  "from_user": "usr_7fa55d15df1f4e3a",
+  "to_user": "usr_0e5cff44c32b4c5b",
+  "status": "accepted",
+  "created_at": "2026-07-08T16:35:49.461304+00:00",
+  "resolved_at": "2026-07-08T17:18:11.967687+00:00"
+ },
+ {
+  "request_id": "frq_39699569076b44be",
+  "from_user": "usr_9b125931e3ec4b93",
+  "to_user": "usr_0e5cff44c32b4c5b",
+  "status": "accepted",
+  "created_at": "2026-07-08T16:38:36.948733+00:00",
+  "resolved_at": "2026-07-08T17:18:13.316743+00:00"
+ },
+ {
+  "request_id": "frq_50e46d84baa144e8",
+  "from_user": "usr_c2b11bc7ac8f4799",
+  "to_user": "usr_7c0b1fa2e71e4be5",
+  "status": "accepted",
+  "created_at": "2026-07-11T14:49:42.825311+00:00",
+  "resolved_at": "2026-07-11T14:49:54.990114+00:00"
+ },
+ {
+  "request_id": "frq_838b3d137d9a4f3d",
+  "from_user": "52972752999",
+  "to_user": "usr_7c0b1fa2e71e4be5",
+  "status": "accepted",
+  "created_at": "2026-08-07T13:50:05.78299+00:00",
+  "resolved_at": "2026-08-08T05:32:04.861078+00:00"
+ },
+ {
+  "request_id": "frq_aded612123e74062",
+  "from_user": "usr_765122601ce24e9c",
+  "to_user": "usr_b4790fc6da4e426a",
+  "status": "pending",
+  "created_at": "2026-07-11T15:08:26.431988+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_27d9ed4b180548ef",
+  "from_user": "usr_4a065520b0f04a0a",
+  "to_user": "usr_983cbfb567f64b9c",
+  "status": "accepted",
+  "created_at": "2026-07-08T17:21:23.366703+00:00",
+  "resolved_at": "2026-07-08T17:23:03.073974+00:00"
+ },
+ {
+  "request_id": "frq_027b7fe9045e4b9f",
+  "from_user": "usr_0e5cff44c32b4c5b",
+  "to_user": "usr_983cbfb567f64b9c",
+  "status": "accepted",
+  "created_at": "2026-07-08T17:23:00.742684+00:00",
+  "resolved_at": "2026-07-08T17:23:06.07104+00:00"
+ },
+ {
+  "request_id": "frq_72c47eb6e044480f",
+  "from_user": "usr_0e5cff44c32b4c5b",
+  "to_user": "usr_4a065520b0f04a0a",
+  "status": "accepted",
+  "created_at": "2026-07-08T17:22:56.004065+00:00",
+  "resolved_at": "2026-07-08T17:25:04.652587+00:00"
+ },
+ {
+  "request_id": "frq_84d96a6698534a4e",
+  "from_user": "usr_f4db4462fcad439b",
+  "to_user": "usr_7c0b1fa2e71e4be5",
+  "status": "accepted",
+  "created_at": "2026-08-05T10:42:23.902816+00:00",
+  "resolved_at": "2026-08-08T05:32:12.821578+00:00"
+ },
+ {
+  "request_id": "frq_7e13582b1caf4830",
+  "from_user": "52972753000",
+  "to_user": "usr_7c0b1fa2e71e4be5",
+  "status": "accepted",
+  "created_at": "2026-08-07T14:28:52.101688+00:00",
+  "resolved_at": "2026-08-08T05:32:13.779761+00:00"
+ },
+ {
+  "request_id": "frq_af233b06066e468e",
+  "from_user": "usr_765122601ce24e9c",
+  "to_user": "usr_704be27a40964072",
+  "status": "pending",
+  "created_at": "2026-07-11T15:08:36.515572+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_83d3023c82e647c1",
+  "from_user": "usr_c2b11bc7ac8f4799",
+  "to_user": "52972753006",
+  "status": "pending",
+  "created_at": "2026-08-08T05:39:43.906983+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_d2933b092eb34615",
+  "from_user": "usr_765122601ce24e9c",
+  "to_user": "usr_6c8df9c644ff4bc4",
+  "status": "pending",
+  "created_at": "2026-07-11T15:08:40.097046+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_1c258b1772634f2a",
+  "from_user": "usr_765122601ce24e9c",
+  "to_user": "usr_ac3bf3dc191f4f50",
+  "status": "pending",
+  "created_at": "2026-07-11T15:08:43.675713+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_549d7716bb164528",
+  "from_user": "usr_765122601ce24e9c",
+  "to_user": "usr_983cbfb567f64b9c",
+  "status": "pending",
+  "created_at": "2026-07-11T15:08:44.257652+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_948ffb16b2884d6e",
+  "from_user": "usr_765122601ce24e9c",
+  "to_user": "usr_0e5cff44c32b4c5b",
+  "status": "pending",
+  "created_at": "2026-07-11T15:08:48.29893+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_459e0ae139d84acb",
+  "from_user": "52972753007",
+  "to_user": "usr_c2b11bc7ac8f4799",
+  "status": "accepted",
+  "created_at": "2026-08-08T04:20:51.079323+00:00",
+  "resolved_at": "2026-08-08T05:39:58.934336+00:00"
+ },
+ {
+  "request_id": "frq_7f87572f98e24bd8",
+  "from_user": "usr_765122601ce24e9c",
+  "to_user": "usr_fe72aca7e98041c3",
+  "status": "pending",
+  "created_at": "2026-07-11T15:08:51.952721+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_a230be45acbc4499",
+  "from_user": "52972753009",
+  "to_user": "usr_c2b11bc7ac8f4799",
+  "status": "accepted",
+  "created_at": "2026-08-08T04:23:38.645997+00:00",
+  "resolved_at": "2026-08-08T05:40:53.925107+00:00"
+ },
+ {
+  "request_id": "frq_5510061362e54b57",
+  "from_user": "usr_765122601ce24e9c",
+  "to_user": "usr_7fa55d15df1f4e3a",
+  "status": "pending",
+  "created_at": "2026-07-11T15:08:54.956546+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_a3c5885760a04612",
+  "from_user": "usr_765122601ce24e9c",
+  "to_user": "usr_4a065520b0f04a0a",
+  "status": "pending",
+  "created_at": "2026-07-11T15:08:56.058909+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_2993cc4b233746db",
+  "from_user": "usr_765122601ce24e9c",
+  "to_user": "usr_9b125931e3ec4b93",
+  "status": "pending",
+  "created_at": "2026-07-11T15:08:56.352555+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_58349efa9b124cd3",
+  "from_user": "52972753010",
+  "to_user": "usr_c2b11bc7ac8f4799",
+  "status": "accepted",
+  "created_at": "2026-08-08T06:49:20.77618+00:00",
+  "resolved_at": "2026-08-08T06:49:50.536801+00:00"
+ },
+ {
+  "request_id": "frq_9f4f83c5be324d51",
+  "from_user": "usr_765122601ce24e9c",
+  "to_user": "usr_7c0b1fa2e71e4be5",
+  "status": "accepted",
+  "created_at": "2026-07-11T15:08:25.900183+00:00",
+  "resolved_at": "2026-07-11T15:15:19.803554+00:00"
+ },
+ {
+  "request_id": "frq_537480fa4c424f22",
+  "from_user": "usr_c2b11bc7ac8f4799",
+  "to_user": "52972752990",
+  "status": "accepted",
+  "created_at": "2026-08-07T13:03:51.495992+00:00",
+  "resolved_at": "2026-08-07T13:04:03.891091+00:00"
+ },
+ {
+  "request_id": "frq_ae7b59f16b7c4ac7",
+  "from_user": "52972752999",
+  "to_user": "usr_765122601ce24e9c",
+  "status": "pending",
+  "created_at": "2026-08-07T13:50:03.239991+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_2548b8d9a23f47e6",
+  "from_user": "52972752999",
+  "to_user": "usr_b4790fc6da4e426a",
+  "status": "pending",
+  "created_at": "2026-08-07T13:50:05.298762+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_d36522c4dadc4656",
+  "from_user": "52972752999",
+  "to_user": "usr_ac3bf3dc191f4f50",
+  "status": "pending",
+  "created_at": "2026-08-07T13:50:08.693055+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_6b5fd935633e42c5",
+  "from_user": "52972752999",
+  "to_user": "usr_0e5cff44c32b4c5b",
+  "status": "pending",
+  "created_at": "2026-08-07T13:50:09.889797+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_e1879b185fb74bf1",
+  "from_user": "52972752999",
+  "to_user": "usr_fe72aca7e98041c3",
+  "status": "pending",
+  "created_at": "2026-08-07T13:50:11.542378+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_fa9a88c047f94458",
+  "from_user": "52972752999",
+  "to_user": "usr_7fa55d15df1f4e3a",
+  "status": "pending",
+  "created_at": "2026-08-07T13:50:12.123987+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_f3aa45a36f0b4d82",
+  "from_user": "52972752999",
+  "to_user": "usr_9b125931e3ec4b93",
+  "status": "pending",
+  "created_at": "2026-08-07T13:50:12.555778+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_c42ed887e8794bab",
+  "from_user": "52972752999",
+  "to_user": "usr_4a065520b0f04a0a",
+  "status": "pending",
+  "created_at": "2026-08-07T13:50:12.860753+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_4a2bdee58f5547ed",
+  "from_user": "52972752999",
+  "to_user": "usr_6c8df9c644ff4bc4",
+  "status": "pending",
+  "created_at": "2026-08-07T13:50:13.333954+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_b54fcf48feb04ff2",
+  "from_user": "52972752999",
+  "to_user": "usr_5525dd63f48547ac",
+  "status": "pending",
+  "created_at": "2026-08-07T13:50:13.897523+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_9f6ec18426c345f1",
+  "from_user": "52972752999",
+  "to_user": "usr_983cbfb567f64b9c",
+  "status": "pending",
+  "created_at": "2026-08-07T13:50:14.738092+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_2564c25a54454b84",
+  "from_user": "52972752999",
+  "to_user": "usr_704be27a40964072",
+  "status": "pending",
+  "created_at": "2026-08-07T13:50:15.031802+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_22bff825d30a4a14",
+  "from_user": "52972752999",
+  "to_user": "usr_0027ce8d4ff9419e",
+  "status": "pending",
+  "created_at": "2026-08-07T13:50:15.138326+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_89f477f84486421a",
+  "from_user": "52972752999",
+  "to_user": "usr_2830a589f98c4bc9",
+  "status": "pending",
+  "created_at": "2026-08-07T13:50:16.463239+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_f653883ec59c4b9c",
+  "from_user": "52972752999",
+  "to_user": "52972752990",
+  "status": "accepted",
+  "created_at": "2026-08-07T13:51:49.476542+00:00",
+  "resolved_at": "2026-08-07T13:53:37.650798+00:00"
+ },
+ {
+  "request_id": "frq_6dff2f80d23e4e61",
+  "from_user": "52972752999",
+  "to_user": "usr_c2b11bc7ac8f4799",
+  "status": "accepted",
+  "created_at": "2026-08-07T13:50:06.525101+00:00",
+  "resolved_at": "2026-08-07T14:01:11.502405+00:00"
+ },
+ {
+  "request_id": "frq_b16d889a6240404d",
+  "from_user": "52972753012",
+  "to_user": "52972753009",
+  "status": "pending",
+  "created_at": "2026-08-08T09:41:07.90219+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_3ee249db6bd84f8d",
+  "from_user": "52972753012",
+  "to_user": "52972753009",
+  "status": "pending",
+  "created_at": "2026-08-08T09:41:08.020962+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_c5dc86f83c654633",
+  "from_user": "52972753012",
+  "to_user": "52972753006",
+  "status": "pending",
+  "created_at": "2026-08-08T09:41:10.320238+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_df695f30850a403a",
+  "from_user": "52972753012",
+  "to_user": "52972753005",
+  "status": "pending",
+  "created_at": "2026-08-08T09:41:11.382728+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_2193a61e83d44a37",
+  "from_user": "52972753012",
+  "to_user": "52972753007",
+  "status": "pending",
+  "created_at": "2026-08-08T09:41:12.707142+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_e2073133084b4f26",
+  "from_user": "52972753012",
+  "to_user": "52972752990",
+  "status": "pending",
+  "created_at": "2026-08-08T09:41:19.424118+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_4193b70abf784d5f",
+  "from_user": "52972753012",
+  "to_user": "usr_e49ab13f4cc64590",
+  "status": "pending",
+  "created_at": "2026-08-08T09:41:22.112397+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_206b5015c73949f0",
+  "from_user": "52972753013",
+  "to_user": "usr_c2b11bc7ac8f4799",
+  "status": "accepted",
+  "created_at": "2026-08-08T11:02:04.698009+00:00",
+  "resolved_at": "2026-08-08T11:02:29.540067+00:00"
+ },
+ {
+  "request_id": "frq_69e285741f934a9f",
+  "from_user": "usr_c2b11bc7ac8f4799",
+  "to_user": "52972753016",
+  "status": "pending",
+  "created_at": "2026-08-08T17:06:04.656026+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_331b6abdc8db4158",
+  "from_user": "52972753017",
+  "to_user": "usr_c2b11bc7ac8f4799",
+  "status": "accepted",
+  "created_at": "2026-08-09T05:59:49.763077+00:00",
+  "resolved_at": "2026-08-09T06:01:14.031677+00:00"
+ },
+ {
+  "request_id": "frq_52936351ca324133",
+  "from_user": "52972753019",
+  "to_user": "52972753007",
+  "status": "pending",
+  "created_at": "2026-08-10T08:37:55.235118+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_4b86109d289041d9",
+  "from_user": "52972753019",
+  "to_user": "52972753006",
+  "status": "pending",
+  "created_at": "2026-08-10T08:37:58.134195+00:00",
+  "resolved_at": null
+ },
+ {
+  "request_id": "frq_10ead98de21f4c10",
+  "from_user": "52972753019",
+  "to_user": "52972753005",
+  "status": "pending",
+  "created_at": "2026-08-10T08:38:00.462138+00:00",
+  "resolved_at": null
+ }
+]

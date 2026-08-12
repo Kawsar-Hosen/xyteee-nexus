@@ -15,6 +15,7 @@ import {
   Alert,
   Linking,
   useWindowDimensions,
+  Text,
 } from "react-native";
 import Animated, {
   useSharedValue,
@@ -63,6 +64,50 @@ import { VerifiedBadge } from "@/src/components/VerifiedBadge";
 
 const REACTIONS = ["❤️", "😂", "🔥", "😮", "😢", "👏", "👍"];
 
+const APP_VERSION = "3.12.0";
+
+type ChatErrorState = { message: string };
+
+class ChatErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  ChatErrorState
+> {
+  state: ChatErrorState = { message: "" };
+
+  static getDerivedStateFromError(error: unknown): ChatErrorState {
+    const msg =
+      error instanceof Error ? `${error.message}\n${error.stack || ""}` : String(error);
+    return { message: msg };
+  }
+
+  componentDidCatch(error: unknown, info: unknown) {
+    console.error("ChatScreen crashed:", error, info);
+  }
+
+  render() {
+    if (this.state.message) {
+      return (
+        <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24, backgroundColor: "#070709" }}>
+          <Text style={{ color: "#fff", fontSize: 16, fontFamily: "Outfit-SemiBold", marginBottom: 8 }}>
+            Chat screen had an error
+          </Text>
+          <Text selectable style={{ color: "#f87171", fontSize: 12, textAlign: "center", fontFamily: "Outfit" }}>
+            {this.state.message}
+          </Text>
+          <TouchableOpacity
+            onPress={() => this.setState({ message: "" })}
+            style={{ marginTop: 20, paddingHorizontal: 24, paddingVertical: 12, borderRadius: 999, backgroundColor: "#8B5CF6" }}
+          >
+            <Text style={{ color: "#fff", fontSize: 14, fontFamily: "Outfit-SemiBold" }}>Try again</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+
 const LIVE_DURATIONS = [
   { label: "15 minutes", ms: 15 * 60 * 1000 },
   { label: "30 minutes", ms: 30 * 60 * 1000 },
@@ -106,7 +151,7 @@ function replyPreviewLabel(m: Msg): string {
   return m.content ? m.content.slice(0, 80) : "Message";
 }
 
-export default function ChatScreen() {
+function ChatScreenInner() {
   const {
     id,
     userId,
@@ -649,14 +694,14 @@ export default function ChatScreen() {
     }
   };
 
-  const stopLiveSharing = (messageId: string) => {
+  const stopLiveSharing = useCallback((messageId: string) => {
     stopLiveLocation(messageId);
     send({
       type: "live_location_end",
       conversation_id,
       message_id: messageId,
     });
-  };
+  }, [conversation_id, send]);
 
   /* ── Voice recording ──────────────────────────────────────────────── */
   const handleMicPress = async () => {
@@ -855,6 +900,33 @@ export default function ChatScreen() {
   const sentTheme = CHAT_THEMES[chatSettings.theme]?.sent;
   const sentThemeFg = CHAT_THEMES[chatSettings.theme]?.sentFg;
 
+  const renderItem = useCallback(
+    ({ item }: { item: Msg }) => (
+      <MessageBubble
+        m={item}
+        isMe={item.sender_id === user?.user_id}
+        onLongPress={() => setActionMsg(item)}
+        onReply={() => setReplyTo(item)}
+        onOpenMedia={() => setViewerMsg(item)}
+        onReplyPress={
+          item.reply_to ? () => scrollToMessage(item.reply_to!) : undefined
+        }
+        highlighted={highlightId === item.message_id}
+        replySource={item.reply_to ? messages.find((x) => x.message_id === item.reply_to) : undefined}
+        other={other}
+        sentBg={sentTheme}
+        sentFg={sentThemeFg}
+        showReadReceipts={chatSettings.readReceipts}
+        onStopLive={(mid) => stopLiveSharing(mid)}
+        onCallAgain={() => {
+          if (item.kind === "call_video") startCall("video", conversation_id, other);
+          else startCall("voice", conversation_id, other);
+        }}
+      />
+    ),
+    [messages, other, user, chatSettings, sentTheme, sentThemeFg, highlightId, conversation_id, scrollToMessage, stopLiveSharing, startCall]
+  );
+
   const lastSeen = other?.online
     ? "online"
     : other?.last_seen
@@ -912,6 +984,9 @@ export default function ChatScreen() {
               >
                 {otherTyping && chatSettings.typingIndicator ? "typing…" : lastSeen}
               </NxText>
+              <View style={{ marginLeft: 6, paddingHorizontal: 4, paddingVertical: 1, borderRadius: 4, backgroundColor: colors.surfaceHigh, borderWidth: 1, borderColor: colors.border }}>
+                <NxText variant="caption" style={{ fontSize: 9, color: colors.mutedFg }}>v{APP_VERSION}</NxText>
+              </View>
             </View>
           </View>
         </TouchableOpacity>
@@ -975,29 +1050,7 @@ export default function ChatScreen() {
             paddingTop: spacing.md,
             paddingBottom: inputBarHeight + spacing.xl + spacing.md,
           }}
-          renderItem={({ item }) => (
-            <MessageBubble
-              m={item}
-              isMe={item.sender_id === user?.user_id}
-              onLongPress={() => setActionMsg(item)}
-              onReply={() => setReplyTo(item)}
-              onOpenMedia={() => setViewerMsg(item)}
-              onReplyPress={
-                item.reply_to ? () => scrollToMessage(item.reply_to!) : undefined
-              }
-              highlighted={highlightId === item.message_id}
-              replySource={item.reply_to ? messages.find((x) => x.message_id === item.reply_to) : undefined}
-              other={other}
-              sentBg={sentTheme}
-              sentFg={sentThemeFg}
-              showReadReceipts={chatSettings.readReceipts}
-              onStopLive={(mid) => stopLiveSharing(mid)}
-              onCallAgain={() => {
-                if (item.kind === "call_video") startCall("video", conversation_id, other);
-                else startCall("voice", conversation_id, other);
-              }}
-            />
-          )}
+          renderItem={renderItem}
           onContentSizeChange={() => {
             scrollToBottom(false);
           }}
@@ -1024,6 +1077,11 @@ export default function ChatScreen() {
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
           showsVerticalScrollIndicator={false}
+          initialNumToRender={20}
+          maxToRenderPerBatch={12}
+          windowSize={11}
+          updateCellsBatchingPeriod={50}
+          removeClippedSubviews={Platform.OS === "android"}
         />
       )}
 
@@ -1595,7 +1653,7 @@ function ViewerVideo({ uri }: { uri: string }) {
 }
 
 /* ── Message bubble ───────────────────────────────────────────────── */
-function MessageBubble({
+const MessageBubble = React.memo(function MessageBubble({
   m,
   isMe,
   onLongPress,
@@ -2201,7 +2259,7 @@ function MessageBubble({
         </Swipeable>
       </View>
   );
-}
+});
 function ReactionBubble({ emoji, selected, onPress }: { emoji: string; selected: boolean; onPress: () => void }) {
   const { colors } = useTheme();
   return (
@@ -2557,3 +2615,11 @@ const styles = StyleSheet.create({
   viewerImage: { width: "100%", height: "100%" },
   viewerVideo: { width: "100%", height: "100%" },
 });
+
+export default function ChatScreen() {
+  return (
+    <ChatErrorBoundary>
+      <ChatScreenInner />
+    </ChatErrorBoundary>
+  );
+}

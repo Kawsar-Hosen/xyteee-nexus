@@ -42,7 +42,7 @@
   "expires_at": "2026-07-07T09:17:33.290251+00:00",
   "story_reactions": [
    {
-    "emoji": "❤️",
+    "emoji": "\u2764\ufe0f",
     "user_id": "usr_ce27312ca20244a9",
     "reacted_at": "2026-07-06T15:50:35.785879+00:00",
     "display_name": "Kawsar Hosen",
@@ -64,7 +64,7 @@
   "user_id": "usr_ac3bf3dc191f4f50",
   "kind": "image",
   "media": "https://pub-cc6993be4fdb448d9fbcd06cfd27f4d1.r2.dev/stories/6a1f8b7209874459b7f0ad5eaec07049.jpg",
-  "caption": "From God, for God, and to God we shall all return. 🤍",
+  "caption": "From God, for God, and to God we shall all return. \ud83e\udd0d",
   "is_private": false,
   "viewers": [
    {
@@ -97,9 +97,9 @@
    },
    {
     "user_id": "usr_983cbfb567f64b9c",
-    "reaction": "❤️",
+    "reaction": "\u2764\ufe0f",
     "reactions": [
-     "❤️"
+     "\u2764\ufe0f"
     ],
     "viewed_at": "2026-07-09T10:04:10.282094+00:00",
     "reacted_at": "2026-07-09T10:04:11.264200+00:00"
@@ -132,11 +132,11 @@
   "viewers": [
    {
     "user_id": "usr_c2b11bc7ac8f4799",
-    "reaction": "❤️",
+    "reaction": "\u2764\ufe0f",
     "reactions": [
-     "❤️",
-     "❤️",
-     "❤️"
+     "\u2764\ufe0f",
+     "\u2764\ufe0f",
+     "\u2764\ufe0f"
     ],
     "viewed_at": "2026-08-02T14:28:03.202806+00:00",
     "reacted_at": "2026-08-03T12:35:52.384302+00:00"
@@ -147,9 +147,9 @@
    },
    {
     "user_id": "usr_51dbbb65356849f9",
-    "reaction": "❤️",
+    "reaction": "\u2764\ufe0f",
     "reactions": [
-     "❤️"
+     "\u2764\ufe0f"
     ],
     "viewed_at": "2026-08-03T12:42:33.678153+00:00",
     "reacted_at": "2026-08-03T12:42:35.004718+00:00"
@@ -178,12 +178,12 @@
   "viewers": [
    {
     "user_id": "usr_c5b4d756f1a24243",
-    "reaction": "❤️",
+    "reaction": "\u2764\ufe0f",
     "reactions": [
-     "❤️",
-     "❤️",
-     "❤️",
-     "🔥"
+     "\u2764\ufe0f",
+     "\u2764\ufe0f",
+     "\u2764\ufe0f",
+     "\ud83d\udd25"
     ],
     "viewed_at": "2026-07-20T18:08:23.218571+00:00",
     "reacted_at": "2026-07-20T18:08:28.951890+00:00"
@@ -203,6 +203,27 @@
   "music_id": null
  },
  {
+  "story_id": "sty_e892a6101cd64083",
+  "user_id": "52972753006",
+  "kind": "image",
+  "media": "https://pub-cc6993be4fdb448d9fbcd06cfd27f4d1.r2.dev/stories/52972753006/file_f0702ebb16384a1a.jpg",
+  "caption": "\ud83d\udca5\u26a1",
+  "is_private": true,
+  "viewers": [],
+  "created_at": "2026-08-08T04:13:30.104279+00:00",
+  "expires_at": "2026-08-09T04:13:30.104296+00:00",
+  "story_reactions": [],
+  "text_x": 0.0185614849187935,
+  "text_y": 0.123094958968347,
+  "text_color": "#FFFFFF",
+  "text_size": 28,
+  "font_index": 0,
+  "media_scale": 0.590894356690379,
+  "media_x": -0.0557969175192707,
+  "media_y": -0.203889218472372,
+  "music_id": "midnight"
+ },
+ {
   "story_id": "sty_7f364974d22f44a0",
   "user_id": "usr_c2b11bc7ac8f4799",
   "kind": "image",
@@ -216,9 +237,9 @@
    },
    {
     "user_id": "usr_51dbbb65356849f9",
-    "reaction": "❤️",
+    "reaction": "\u2764\ufe0f",
     "reactions": [
-     "❤️"
+     "\u2764\ufe0f"
     ],
     "viewed_at": "2026-08-03T12:42:28.185010+00:00",
     "reacted_at": "2026-08-03T12:42:30.093686+00:00"
@@ -251,9 +272,9 @@
   "viewers": [
    {
     "user_id": "usr_8c63dd0885514789",
-    "reaction": "😂",
+    "reaction": "\ud83d\ude02",
     "reactions": [
-     "😂"
+     "\ud83d\ude02"
     ],
     "viewed_at": "2026-07-12T07:14:09.783847+00:00",
     "reacted_at": "2026-07-12T07:14:12.634071+00:00"
@@ -315,18 +336,18 @@
    },
    {
     "user_id": "usr_ac3bf3dc191f4f50",
-    "reaction": "👍",
+    "reaction": "\ud83d\udc4d",
     "reactions": [
-     "👍"
+     "\ud83d\udc4d"
     ],
     "viewed_at": "2026-07-08T17:54:39.281772+00:00",
     "reacted_at": "2026-07-08T17:54:50.134725+00:00"
    },
    {
     "user_id": "usr_ce27312ca20244a9",
-    "reaction": "👏",
+    "reaction": "\ud83d\udc4f",
     "reactions": [
-     "👏"
+     "\ud83d\udc4f"
     ],
     "viewed_at": "2026-07-08T18:29:37.778232+00:00",
     "reacted_at": "2026-07-08T18:29:44.670110+00:00"
@@ -349,9 +370,9 @@
    },
    {
     "user_id": "usr_983cbfb567f64b9c",
-    "reaction": "❤️",
+    "reaction": "\u2764\ufe0f",
     "reactions": [
-     "❤️"
+     "\u2764\ufe0f"
     ],
     "viewed_at": "2026-07-09T10:04:15.274639+00:00",
     "reacted_at": "2026-07-09T10:04:16.728289+00:00"
@@ -405,7 +426,7 @@
   "user_id": "usr_ac3bf3dc191f4f50",
   "kind": "image",
   "media": "https://pub-cc6993be4fdb448d9fbcd06cfd27f4d1.r2.dev/stories/30411f846baa49af9bfb35927fcc4267.jpg",
-  "caption": "From God, for God, and to God we shall all return. 🤍\n",
+  "caption": "From God, for God, and to God we shall all return. \ud83e\udd0d\n",
   "is_private": false,
   "viewers": [
    {
@@ -438,9 +459,9 @@
    },
    {
     "user_id": "usr_983cbfb567f64b9c",
-    "reaction": "❤️",
+    "reaction": "\u2764\ufe0f",
     "reactions": [
-     "❤️"
+     "\u2764\ufe0f"
     ],
     "viewed_at": "2026-07-09T10:04:03.822405+00:00",
     "reacted_at": "2026-07-09T10:04:09.857756+00:00"
@@ -481,9 +502,9 @@
    },
    {
     "user_id": "usr_983cbfb567f64b9c",
-    "reaction": "❤️",
+    "reaction": "\u2764\ufe0f",
     "reactions": [
-     "❤️"
+     "\u2764\ufe0f"
     ],
     "viewed_at": "2026-07-09T10:04:12.012884+00:00",
     "reacted_at": "2026-07-09T10:04:14.381485+00:00"
@@ -516,9 +537,9 @@
   "viewers": [
    {
     "user_id": "usr_51dbbb65356849f9",
-    "reaction": "❤️",
+    "reaction": "\u2764\ufe0f",
     "reactions": [
-     "❤️"
+     "\u2764\ufe0f"
     ],
     "viewed_at": "2026-08-03T12:42:30.754264+00:00",
     "reacted_at": "2026-08-03T12:42:31.801839+00:00"
@@ -542,6 +563,51 @@
   "music_id": "rain"
  },
  {
+  "story_id": "sty_6e65facb2a3d4823",
+  "user_id": "usr_c2b11bc7ac8f4799",
+  "kind": "image",
+  "media": "https://pub-cc6993be4fdb448d9fbcd06cfd27f4d1.r2.dev/stories/usr_c2b11bc7ac8f4799/file_062b27faa95d4c02.png",
+  "caption": "",
+  "is_private": false,
+  "viewers": [
+   {
+    "user_id": "52972753017",
+    "reaction": "\u2764\ufe0f",
+    "reactions": [
+     "\u2764\ufe0f",
+     "\u2764\ufe0f"
+    ],
+    "viewed_at": "2026-08-09T05:59:32.901889+00:00",
+    "reacted_at": "2026-08-09T05:59:35.523137+00:00"
+   },
+   {
+    "user_id": "52972753014",
+    "reaction": "\u2764\ufe0f",
+    "reactions": [
+     "\u2764\ufe0f"
+    ],
+    "viewed_at": "2026-08-09T11:07:09.456756+00:00",
+    "reacted_at": "2026-08-09T11:07:21.156612+00:00"
+   },
+   {
+    "user_id": "52972753005",
+    "viewed_at": "2026-08-09T12:28:35.966247+00:00"
+   }
+  ],
+  "created_at": "2026-08-09T05:43:52.040049+00:00",
+  "expires_at": "2026-08-10T05:43:52.040078+00:00",
+  "story_reactions": [],
+  "text_x": 0.266064074941283,
+  "text_y": 0.258545242512108,
+  "text_color": "#FFFFFF",
+  "text_size": 28,
+  "font_index": 0,
+  "media_scale": 1,
+  "media_x": 0,
+  "media_y": 0,
+  "music_id": "city"
+ },
+ {
   "story_id": "sty_cf193aae4a284ef3",
   "user_id": "usr_c2b11bc7ac8f4799",
   "kind": "image",
@@ -551,12 +617,12 @@
   "viewers": [
    {
     "user_id": "usr_8c63dd0885514789",
-    "reaction": "😂",
+    "reaction": "\ud83d\ude02",
     "reactions": [
-     "😂",
-     "🔥",
-     "👏",
-     "👍"
+     "\ud83d\ude02",
+     "\ud83d\udd25",
+     "\ud83d\udc4f",
+     "\ud83d\udc4d"
     ],
     "viewed_at": "2026-07-10T16:54:38.191379+00:00",
     "reacted_at": "2026-07-10T21:16:07.984185+00:00"
@@ -623,6 +689,104 @@
   "music_id": null
  },
  {
+  "story_id": "sty_803aebaa076d451d",
+  "user_id": "52972753005",
+  "kind": "image",
+  "media": "https://pub-cc6993be4fdb448d9fbcd06cfd27f4d1.r2.dev/stories/52972753005/file_702811fce72740de.png",
+  "caption": "\ud83d\uddef\ufe0f\u2705",
+  "is_private": false,
+  "viewers": [
+   {
+    "user_id": "usr_c2b11bc7ac8f4799",
+    "reaction": "\u2764\ufe0f",
+    "reactions": [
+     "\u2764\ufe0f"
+    ],
+    "viewed_at": "2026-08-08T03:58:52.548210+00:00",
+    "reacted_at": "2026-08-08T03:58:57.210033+00:00"
+   },
+   {
+    "user_id": "52972753006",
+    "reaction": "\u2764\ufe0f",
+    "reactions": [
+     "\u2764\ufe0f",
+     "\u2764\ufe0f"
+    ],
+    "viewed_at": "2026-08-08T04:11:35.086455+00:00",
+    "reacted_at": "2026-08-08T04:30:36.066692+00:00"
+   },
+   {
+    "user_id": "52972753007",
+    "reaction": "\u2764\ufe0f",
+    "reactions": [
+     "\u2764\ufe0f"
+    ],
+    "viewed_at": "2026-08-08T04:16:48.228887+00:00",
+    "reacted_at": "2026-08-08T04:20:57.878945+00:00"
+   },
+   {
+    "user_id": "52972753009",
+    "viewed_at": "2026-08-08T04:23:07.610144+00:00"
+   },
+   {
+    "user_id": "usr_7c0b1fa2e71e4be5",
+    "reaction": "\u2764\ufe0f",
+    "reactions": [
+     "\u2764\ufe0f"
+    ],
+    "viewed_at": "2026-08-08T05:29:35.889328+00:00",
+    "reacted_at": "2026-08-08T05:29:38.450998+00:00"
+   },
+   {
+    "user_id": "52972753010",
+    "viewed_at": "2026-08-08T06:49:45.767280+00:00"
+   },
+   {
+    "user_id": "52972753011",
+    "reaction": "\u2764\ufe0f",
+    "reactions": [
+     "\u2764\ufe0f"
+    ],
+    "viewed_at": "2026-08-08T06:54:57.364309+00:00",
+    "reacted_at": "2026-08-08T06:54:58.628457+00:00"
+   },
+   {
+    "user_id": "52972753013",
+    "viewed_at": "2026-08-08T11:02:31.326617+00:00"
+   },
+   {
+    "user_id": "52972753014",
+    "reaction": "\u2764\ufe0f",
+    "reactions": [
+     "\u2764\ufe0f",
+     "\u2764\ufe0f"
+    ],
+    "viewed_at": "2026-08-08T11:41:35.087602+00:00",
+    "reacted_at": "2026-08-08T11:41:41.083445+00:00"
+   },
+   {
+    "user_id": "52972753015",
+    "viewed_at": "2026-08-08T12:04:09.662014+00:00"
+   },
+   {
+    "user_id": "52972753016",
+    "viewed_at": "2026-08-08T17:04:09.159830+00:00"
+   }
+  ],
+  "created_at": "2026-08-08T03:51:17.847407+00:00",
+  "expires_at": "2026-08-09T03:51:17.847429+00:00",
+  "story_reactions": [],
+  "text_x": 0.0188679245283019,
+  "text_y": 0.178946358149408,
+  "text_color": "#FFFFFF",
+  "text_size": 28,
+  "font_index": 0,
+  "media_scale": 1,
+  "media_x": 0,
+  "media_y": 0,
+  "music_id": null
+ },
+ {
   "story_id": "sty_dc786273ff4e4274",
   "user_id": "usr_51dbbb65356849f9",
   "kind": "video",
@@ -632,10 +796,10 @@
   "viewers": [
    {
     "user_id": "usr_c2b11bc7ac8f4799",
-    "reaction": "❤️",
+    "reaction": "\u2764\ufe0f",
     "reactions": [
-     "❤️",
-     "❤️"
+     "\u2764\ufe0f",
+     "\u2764\ufe0f"
     ],
     "viewed_at": "2026-08-03T12:50:07.352783+00:00",
     "reacted_at": "2026-08-03T12:50:12.272233+00:00"
@@ -664,31 +828,31 @@
   "viewers": [
    {
     "user_id": "usr_c2b11bc7ac8f4799",
-    "reaction": "❤️",
+    "reaction": "\u2764\ufe0f",
     "reactions": [
-     "❤️",
-     "🔥",
-     "😍",
-     "😱",
-     "👍"
+     "\u2764\ufe0f",
+     "\ud83d\udd25",
+     "\ud83d\ude0d",
+     "\ud83d\ude31",
+     "\ud83d\udc4d"
     ],
     "viewed_at": "2026-07-11T09:55:21.118299+00:00",
     "reacted_at": "2026-07-11T09:55:36.649350+00:00"
    },
    {
     "user_id": "usr_7c0b1fa2e71e4be5",
-    "reaction": "❤️",
+    "reaction": "\u2764\ufe0f",
     "reactions": [
-     "❤️"
+     "\u2764\ufe0f"
     ],
     "viewed_at": "2026-07-11T14:48:55.970070+00:00",
     "reacted_at": "2026-07-11T14:49:00.338982+00:00"
    },
    {
     "user_id": "usr_765122601ce24e9c",
-    "reaction": "❤️",
+    "reaction": "\u2764\ufe0f",
     "reactions": [
-     "❤️"
+     "\u2764\ufe0f"
     ],
     "viewed_at": "2026-07-11T15:09:18.205159+00:00",
     "reacted_at": "2026-07-11T15:09:21.316635+00:00"
@@ -714,5 +878,256 @@
   "media_x": 0,
   "media_y": 0,
   "music_id": null
+ },
+ {
+  "story_id": "sty_5733c044814a43de",
+  "user_id": "52972753005",
+  "kind": "image",
+  "media": "https://pub-cc6993be4fdb448d9fbcd06cfd27f4d1.r2.dev/stories/52972753005/file_05dc89a5e4074752.jpg",
+  "caption": "",
+  "is_private": false,
+  "viewers": [
+   {
+    "user_id": "usr_c2b11bc7ac8f4799",
+    "reaction": "\u2764\ufe0f",
+    "reactions": [
+     "\u2764\ufe0f"
+    ],
+    "viewed_at": "2026-08-09T13:35:50.387235+00:00",
+    "reacted_at": "2026-08-09T13:35:51.973449+00:00"
+   },
+   {
+    "user_id": "52972753019",
+    "reaction": "\u2764\ufe0f",
+    "reactions": [
+     "\u2764\ufe0f",
+     "\u2764\ufe0f"
+    ],
+    "viewed_at": "2026-08-10T08:37:26.928792+00:00",
+    "reacted_at": "2026-08-10T08:37:30.095941+00:00"
+   }
+  ],
+  "created_at": "2026-08-09T12:29:43.640557+00:00",
+  "expires_at": "2026-08-10T12:29:43.640573+00:00",
+  "story_reactions": [],
+  "text_x": 0.08,
+  "text_y": 0.38,
+  "text_color": "#FFFFFF",
+  "text_size": 28,
+  "font_index": 0,
+  "media_scale": 0.646535325820263,
+  "media_x": -0.0451497851677661,
+  "media_y": -0.0263257695030689,
+  "music_id": "sunrise"
+ },
+ {
+  "story_id": "sty_3f719a6bf6b0482a",
+  "user_id": "52972753007",
+  "kind": "image",
+  "media": "https://pub-cc6993be4fdb448d9fbcd06cfd27f4d1.r2.dev/stories/52972753007/file_17046f2a417e4e7c.jpg",
+  "caption": "",
+  "is_private": false,
+  "viewers": [
+   {
+    "user_id": "52972753005",
+    "reaction": "\u2764\ufe0f",
+    "reactions": [
+     "\u2764\ufe0f",
+     "\u2764\ufe0f"
+    ],
+    "viewed_at": "2026-08-08T04:19:47.206481+00:00",
+    "reacted_at": "2026-08-08T04:19:49.419123+00:00"
+   },
+   {
+    "user_id": "52972753009",
+    "viewed_at": "2026-08-08T04:23:04.746070+00:00"
+   },
+   {
+    "user_id": "52972753006",
+    "reaction": "\u2764\ufe0f",
+    "reactions": [
+     "\u2764\ufe0f"
+    ],
+    "viewed_at": "2026-08-08T04:30:21.701017+00:00",
+    "reacted_at": "2026-08-08T04:30:24.994234+00:00"
+   },
+   {
+    "user_id": "usr_c2b11bc7ac8f4799",
+    "reaction": "\u2764\ufe0f",
+    "reactions": [
+     "\u2764\ufe0f"
+    ],
+    "viewed_at": "2026-08-08T04:53:58.755200+00:00",
+    "reacted_at": "2026-08-08T04:53:59.879420+00:00"
+   },
+   {
+    "user_id": "usr_7c0b1fa2e71e4be5",
+    "reaction": "\u2764\ufe0f",
+    "reactions": [
+     "\u2764\ufe0f"
+    ],
+    "viewed_at": "2026-08-08T05:29:27.784289+00:00",
+    "reacted_at": "2026-08-08T05:29:35.886041+00:00"
+   },
+   {
+    "user_id": "52972753010",
+    "viewed_at": "2026-08-08T06:49:30.725390+00:00"
+   },
+   {
+    "user_id": "52972753011",
+    "reaction": "\u2764\ufe0f",
+    "reactions": [
+     "\u2764\ufe0f"
+    ],
+    "viewed_at": "2026-08-08T06:54:54.992962+00:00",
+    "reacted_at": "2026-08-08T06:54:56.374039+00:00"
+   },
+   {
+    "user_id": "52972753013",
+    "viewed_at": "2026-08-08T11:02:16.291289+00:00"
+   },
+   {
+    "user_id": "52972753014",
+    "reaction": "\u2764\ufe0f",
+    "reactions": [
+     "\u2764\ufe0f"
+    ],
+    "viewed_at": "2026-08-08T11:41:30.801749+00:00",
+    "reacted_at": "2026-08-08T11:41:33.883668+00:00"
+   },
+   {
+    "user_id": "52972753015",
+    "viewed_at": "2026-08-08T12:04:05.068071+00:00"
+   },
+   {
+    "user_id": "52972753016",
+    "viewed_at": "2026-08-08T17:04:06.549802+00:00"
+   }
+  ],
+  "created_at": "2026-08-08T04:18:27.854736+00:00",
+  "expires_at": "2026-08-09T04:18:27.854786+00:00",
+  "story_reactions": [],
+  "text_x": 0.08,
+  "text_y": 0.38,
+  "text_color": "#FFFFFF",
+  "text_size": 28,
+  "font_index": 0,
+  "media_scale": 1,
+  "media_x": 0,
+  "media_y": 0,
+  "music_id": null
+ },
+ {
+  "story_id": "sty_d224bba9af024295",
+  "user_id": "usr_c2b11bc7ac8f4799",
+  "kind": "image",
+  "media": "https://pub-cc6993be4fdb448d9fbcd06cfd27f4d1.r2.dev/stories/usr_c2b11bc7ac8f4799/file_4ca838f29b934574.jpg",
+  "caption": "",
+  "is_private": false,
+  "viewers": [
+   {
+    "user_id": "52972753005",
+    "reaction": "\u2764\ufe0f",
+    "reactions": [
+     "\u2764\ufe0f",
+     "\u2764\ufe0f",
+     "\u2764\ufe0f",
+     "\u2764\ufe0f"
+    ],
+    "viewed_at": "2026-08-08T03:49:51.750735+00:00",
+    "reacted_at": "2026-08-08T03:52:20.258920+00:00"
+   },
+   {
+    "user_id": "52972753006",
+    "reaction": "\u2764\ufe0f",
+    "reactions": [
+     "\u2764\ufe0f",
+     "\u2764\ufe0f"
+    ],
+    "viewed_at": "2026-08-08T04:11:41.591837+00:00",
+    "reacted_at": "2026-08-08T04:30:52.403916+00:00"
+   },
+   {
+    "user_id": "52972753007",
+    "reaction": "\u2764\ufe0f",
+    "reactions": [
+     "\u2764\ufe0f",
+     "\u2764\ufe0f"
+    ],
+    "viewed_at": "2026-08-08T04:16:43.066642+00:00",
+    "reacted_at": "2026-08-08T04:16:47.453351+00:00"
+   },
+   {
+    "user_id": "52972753009",
+    "viewed_at": "2026-08-08T04:23:09.602228+00:00"
+   },
+   {
+    "user_id": "usr_7c0b1fa2e71e4be5",
+    "reaction": "\u2764\ufe0f",
+    "reactions": [
+     "\u2764\ufe0f"
+    ],
+    "viewed_at": "2026-08-08T05:29:22.800586+00:00",
+    "reacted_at": "2026-08-08T05:29:26.819363+00:00"
+   },
+   {
+    "user_id": "52972753010",
+    "viewed_at": "2026-08-08T06:49:15.772071+00:00"
+   },
+   {
+    "user_id": "52972753011",
+    "reaction": "\u2764\ufe0f",
+    "reactions": [
+     "\u2764\ufe0f"
+    ],
+    "viewed_at": "2026-08-08T06:54:52.385861+00:00",
+    "reacted_at": "2026-08-08T06:54:53.896571+00:00"
+   },
+   {
+    "user_id": "52972753013",
+    "reaction": "\u2764\ufe0f",
+    "reactions": [
+     "\u2764\ufe0f"
+    ],
+    "viewed_at": "2026-08-08T11:01:17.308618+00:00",
+    "reacted_at": "2026-08-08T11:01:19.775728+00:00"
+   },
+   {
+    "user_id": "52972753014",
+    "reaction": "\u2764\ufe0f",
+    "reactions": [
+     "\u2764\ufe0f",
+     "\u2764\ufe0f",
+     "\u2764\ufe0f"
+    ],
+    "viewed_at": "2026-08-08T11:41:36.332812+00:00",
+    "reacted_at": "2026-08-08T11:41:44.333189+00:00"
+   },
+   {
+    "user_id": "52972753015",
+    "viewed_at": "2026-08-08T12:04:13.339017+00:00"
+   },
+   {
+    "user_id": "52972753016",
+    "reaction": "\u2764\ufe0f",
+    "reactions": [
+     "\u2764\ufe0f"
+    ],
+    "viewed_at": "2026-08-08T17:04:01.012506+00:00",
+    "reacted_at": "2026-08-08T17:04:04.803263+00:00"
+   }
+  ],
+  "created_at": "2026-08-08T03:12:58.665589+00:00",
+  "expires_at": "2026-08-09T03:12:58.665614+00:00",
+  "story_reactions": [],
+  "text_x": 0.08,
+  "text_y": 0.38,
+  "text_color": "#FFFFFF",
+  "text_size": 28,
+  "font_index": 0,
+  "media_scale": 1,
+  "media_x": 0,
+  "media_y": 0,
+  "music_id": "midnight"
  }
 ]

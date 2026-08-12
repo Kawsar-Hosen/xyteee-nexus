@@ -2,7 +2,7 @@
   "expo": {
     "name": "Nexus",
     "slug": "xyteee-nexus",
-    "version": "3.11.0",
+    "version": "3.12.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": ["xyteeenexus", "com.googleusercontent.apps.940343114841-mj0qgb95o1cjsud59j4isb6tp4jm6v2h"],
@@ -22,13 +22,13 @@
     "android": {
       "package": "com.xyteee.nexus",
       "googleServicesFile": "./google-services.json",
-      "versionCode": 13001,
-      "softwareKeyboardLayoutMode": "pan",
+      "versionCode": 13002,
+      "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#070709"
       },
-      "edgeToEdgeEnabled": true,
+      "edgeToEdgeEnabled": false,
       "intentFilters": [
         {
           "action": "VIEW",

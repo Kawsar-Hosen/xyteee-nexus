@@ -9,6 +9,9 @@ import {
   ActivityIndicator,
   Platform,
   Image,
+  Modal,
+  Alert,
+  Pressable,
 } from "react-native";
 import { useRouter, useFocusEffect } from "expo-router";
 import { useVideoPlayer, VideoView } from "expo-video";
@@ -59,6 +62,9 @@ type Chat = {
   unread: number;
   is_bonded?: boolean;
   is_request?: boolean;
+  muted?: boolean;
+  archived?: boolean;
+  pinned?: boolean;
   other_user: {
     user_id: string;
     display_name: string;
@@ -104,6 +110,17 @@ export default function Feed() {
   const [loading, setLoading] = useState(() => feedCache === null);
   const [refreshing, setRefreshing] = useState(false);
   const loadingRef = useRef(false);
+
+  const [menuChat, setMenuChat] = useState<Chat | null>(null);
+  const [busyAction, setBusyAction] = useState<ChatMenuAction | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
+  const [confirm, setConfirm] = useState<{
+    title: string;
+    message: string;
+    danger?: boolean;
+    confirmLabel: string;
+    onConfirm: () => void;
+  } | null>(null);
 
   // Seed from the last saved session so a returning user sees content
   // immediately (like profile) while the background refresh runs.
@@ -214,6 +231,42 @@ export default function Feed() {
         return;
       }
 
+      if (e.type === "conv_pref") {
+        const prefKey =
+          e.pref === "muted"
+            ? "muted"
+            : e.pref === "archived"
+              ? "archived"
+              : e.pref === "pinned"
+                ? "pinned"
+                : null;
+        if (prefKey) {
+          setChats((current) => {
+            const nextChats = current.map((chat) =>
+              chat.conversation_id === e.conversation_id
+                ? { ...chat, [prefKey]: e.enabled }
+                : chat
+            );
+            if (feedCache) feedCache.chats = nextChats;
+            return nextChats;
+          });
+        }
+        return;
+      }
+
+      if (e.type === "chat_read") {
+        setChats((current) => {
+          const nextChats = current.map((chat) =>
+            chat.conversation_id === e.conversation_id
+              ? { ...chat, unread: 0 }
+              : chat
+          );
+          if (feedCache) feedCache.chats = nextChats;
+          return nextChats;
+        });
+        return;
+      }
+
       if (e.type === "message") {
         const message = e.message;
         const conversationId = message?.conversation_id;
@@ -307,6 +360,132 @@ export default function Feed() {
     setRefreshing(false);
   };
 
+  const runChatAction = useCallback(
+    async (action: ChatMenuAction, chat: Chat) => {
+      const convId = chat.conversation_id;
+      const patch = (next: Partial<Chat>) => {
+        setChats((current) => {
+          const nextChats = current.map((c) =>
+            c.conversation_id === convId ? { ...c, ...next } : c
+          );
+          if (feedCache) feedCache.chats = nextChats;
+          return nextChats;
+        });
+      };
+      const apiCall = (body?: Record<string, unknown>) => {
+        const endpoint =
+          action === "unmute"
+            ? "mute"
+            : action === "unarchive"
+              ? "archive"
+              : action === "unpin"
+                ? "pin"
+                : action;
+        return api(`/chats/${convId}/${endpoint}`, {
+          method: "POST",
+          token,
+          body,
+        });
+      };
+
+      if (action === "mark-as-read") {
+        setBusyAction(action);
+        try {
+          await api(`/chats/${convId}/read`, { method: "POST", token });
+          patch({ unread: 0 });
+        } catch {
+          Alert.alert("Error", "Couldn't mark as read. Try again.");
+        } finally {
+          setBusyAction(null);
+          setMenuChat(null);
+        }
+        return;
+      }
+
+      if (action === "delete") {
+        setMenuChat(null);
+        setConfirm({
+          title: "Delete conversation",
+          message: `Delete this chat with ${chat.other_user?.display_name || "this user"}? This only removes it for you.`,
+          confirmLabel: "Delete",
+          danger: true,
+          onConfirm: async () => {
+            setBusyAction(action);
+            try {
+              await api(`/chats/${convId}/delete`, { method: "POST", token });
+              setChats((current) => {
+                const nextChats = current.filter(
+                  (c) => c.conversation_id !== convId
+                );
+                if (feedCache) feedCache.chats = nextChats;
+                return nextChats;
+              });
+            } catch {
+              Alert.alert("Error", "Couldn't delete conversation.");
+            } finally {
+              setBusyAction(null);
+            }
+          },
+        });
+        return;
+      }
+
+      if (action === "block") {
+        setMenuChat(null);
+        setConfirm({
+          title: "Block user",
+          message: `Block ${chat.other_user?.display_name || "this user"}? They won't be able to message or find you.`,
+          confirmLabel: "Block",
+          danger: true,
+          onConfirm: async () => {
+            setBusyAction(action);
+            try {
+              await api("/friends/block", {
+                method: "POST",
+                token,
+                body: { user_id: chat.other_user?.user_id },
+              });
+              setChats((current) => {
+                const nextChats = current.filter(
+                  (c) => c.conversation_id !== convId
+                );
+                if (feedCache) feedCache.chats = nextChats;
+                return nextChats;
+              });
+            } catch {
+              Alert.alert("Error", "Couldn't block user.");
+            } finally {
+              setBusyAction(null);
+            }
+          },
+        });
+        return;
+      }
+
+      // mute / archive / pin — toggle
+      const key: "mute" | "archive" | "pin" =
+        action === "mute" || action === "unmute"
+          ? "mute"
+          : action === "archive" || action === "unarchive"
+            ? "archive"
+            : "pin";
+      const isNow = action === "unmute" || action === "unarchive" || action === "unpin";
+      const newVal = !isNow;
+      setBusyAction(action);
+      patch({ [key]: newVal } as Partial<Chat>);
+      try {
+        await apiCall({ enabled: newVal });
+      } catch {
+        patch({ [key]: isNow } as Partial<Chat>);
+        Alert.alert("Error", "Couldn't update conversation.");
+      } finally {
+        setBusyAction(null);
+        setMenuChat(null);
+      }
+    },
+    [token]
+  );
+
   return (
     <SafeAreaView edges={["top"]} style={{ flex: 1, backgroundColor: colors.background }}>
       <View style={[styles.header, { backgroundColor: colors.glass, borderBottomColor: colors.border }]}>
@@ -346,12 +525,21 @@ export default function Feed() {
         <FeedSkeleton />
       ) : (
         <FlatList
-          data={chats.filter((c) => c.is_request !== true)}
+          data={[
+            ...chats
+              .filter((c) => c.is_request !== true)
+              .filter((c) => (showArchived ? c.archived === true : c.archived !== true))
+              .sort((a, b) => {
+                if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
+                return 0;
+              }),
+          ]}
           keyExtractor={(c) => c.conversation_id}
           renderItem={({ item }) => (
             <ChatRow
               chat={item}
               isTyping={!!typingChats[item.conversation_id]}
+              onLongPress={() => setMenuChat(item)}
               onPress={() => {
                 setChats((current) => {
                   const nextChats = current.map((chat) =>
@@ -447,6 +635,56 @@ export default function Feed() {
                   </TouchableOpacity>
                 </View>
               </View>
+
+              {(() => {
+                const archivedCount = chats.filter(
+                  (c) => c.is_request !== true && c.archived === true
+                ).length;
+                if (archivedCount === 0) return null;
+                return (
+                  <TouchableOpacity
+                    testID="feed-archived-folder"
+                    onPress={() => setShowArchived((v) => !v)}
+                    activeOpacity={0.7}
+                    style={[
+                      styles.archivedFolder,
+                      {
+                        backgroundColor: colors.surface,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  >
+                    <View
+                      style={[
+                        styles.menuRowIcon,
+                        { backgroundColor: colors.surfaceHigh },
+                      ]}
+                    >
+                      <MaterialCommunityIcons name="archive-outline" size={18} color={colors.primary} />
+                    </View>
+                    <NxText
+                      style={{
+                        flex: 1,
+                        marginLeft: 12,
+                        fontFamily: fonts.bodyMedium,
+                        fontSize: 15,
+                        color: colors.foreground,
+                      }}
+                    >
+                      Archived
+                    </NxText>
+                    <NxText variant="caption" style={{ color: colors.mutedFg }}>
+                      {archivedCount}
+                    </NxText>
+                    <Feather
+                      name={showArchived ? "chevron-up" : "chevron-down"}
+                      size={18}
+                      color={colors.mutedFg}
+                      style={{ marginLeft: 8 }}
+                    />
+                  </TouchableOpacity>
+                );
+              })()}
             </View>
           }
           ListEmptyComponent={
@@ -460,6 +698,25 @@ export default function Feed() {
           }
         />
       )}
+
+      <ChatContextMenu
+        chat={menuChat}
+        busyAction={busyAction}
+        onClose={() => setMenuChat(null)}
+        onAction={(action) => {
+          if (menuChat) runChatAction(action, menuChat);
+        }}
+      />
+
+      <ConfirmDialog
+        confirm={confirm}
+        onClose={() => setConfirm(null)}
+        onConfirm={() => {
+          const c = confirm;
+          setConfirm(null);
+          c?.onConfirm();
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -843,10 +1100,12 @@ function ChatRow({
   chat,
   isTyping,
   onPress,
+  onLongPress,
 }: {
   chat: Chat;
   isTyping: boolean;
   onPress: () => void;
+  onLongPress: () => void;
 }) {
   const { colors } = useTheme();
   const preview = isTyping ? "Typing…" : getSmartPreview(chat.last_message);
@@ -857,8 +1116,18 @@ function ChatRow({
     <TouchableOpacity
       testID={`chat-row-${chat.conversation_id}`}
       onPress={onPress}
+      onLongPress={onLongPress}
+      delayLongPress={320}
       activeOpacity={0.72}
       style={styles.chatRow}
+      {...(Platform.OS === "web"
+        ? {
+            onContextMenu: (e: any) => {
+              e.preventDefault();
+              onLongPress();
+            },
+          }
+        : {})}
     >
       <Avatar
         uri={chat.other_user?.profile_picture}
@@ -890,6 +1159,13 @@ function ChatRow({
               badgeExpiresAt={chat.other_user?.badge_expires_at}
               size={16}
             />
+
+            {chat.muted ? (
+              <MaterialCommunityIcons name="bell-off" size={14} color="#8B8D98" style={{ marginLeft: 6 }} />
+            ) : null}
+            {chat.pinned ? (
+              <MaterialCommunityIcons name="pin" size={14} color="#CFA876" style={{ marginLeft: 6 }} />
+            ) : null}
           </View>
 
           <NxText
@@ -937,6 +1213,245 @@ function ChatRow({
         </View>
       </View>
     </TouchableOpacity>
+  );
+}
+
+type ChatMenuAction = "mute" | "unmute" | "mark-as-read" | "archive" | "unarchive" | "pin" | "unpin" | "delete" | "block";
+
+function ChatContextMenu({
+  chat,
+  busyAction,
+  onClose,
+  onAction,
+}: {
+  chat: Chat | null;
+  busyAction: ChatMenuAction | null;
+  onClose: () => void;
+  onAction: (action: ChatMenuAction) => void;
+}) {
+  const { colors } = useTheme();
+  if (!chat) return null;
+
+  const busy = busyAction !== null;
+
+  const muted = chat.muted;
+  const archived = chat.archived;
+  const pinned = chat.pinned;
+
+  const rows: {
+    icon: string;
+    mci?: boolean;
+    label: string;
+    action: ChatMenuAction;
+    danger?: boolean;
+  }[] = [
+    {
+      icon: pinned ? "pin-off" : "pin",
+      mci: true,
+      label: pinned ? "Unpin" : "Pin",
+      action: pinned ? "unpin" : "pin",
+    },
+    {
+      icon: muted ? "bell-off-outline" : "bell-outline",
+      mci: true,
+      label: muted ? "Unmute" : "Mute",
+      action: muted ? "unmute" : "mute",
+    },
+    { icon: "check-all", mci: true, label: "Mark as read", action: "mark-as-read" },
+    {
+      icon: archived ? "archive-arrow-down-outline" : "archive-arrow-up-outline",
+      mci: true,
+      label: archived ? "Unarchive" : "Archive",
+      action: archived ? "unarchive" : "archive",
+    },
+    { icon: "cancel", mci: true, label: "Block", action: "block", danger: true },
+    { icon: "trash-can-outline", mci: true, label: "Delete chat", action: "delete", danger: true },
+  ];
+
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable
+        testID="chat-menu-backdrop"
+        style={{ flex: 1, backgroundColor: colors.overlay }}
+        onPress={busy ? undefined : onClose}
+      >
+        <Pressable
+          style={[styles.menuSheet, { backgroundColor: colors.backgroundElevated, borderColor: colors.border }]}
+          onPress={(e) => e.stopPropagation()}
+        >
+          <View style={[styles.menuHandle, { backgroundColor: colors.surfaceHigh }]} />
+
+          <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 20, paddingBottom: 12 }}>
+            <Avatar
+              uri={chat.other_user?.profile_picture}
+              name={chat.other_user?.display_name}
+              size={40}
+              frame={chat.other_user?.profile_frame}
+              achievement={chat.other_user?.achievement_level}
+              animation={chat.other_user?.profile_animation}
+              animationSpeed={chat.other_user?.profile_animation_speed}
+              animationIntensity={chat.other_user?.profile_animation_intensity}
+            />
+            <View style={{ marginLeft: 12, flex: 1 }}>
+              <NxText variant="titleSm" numberOfLines={1}>
+                {chat.other_user?.display_name || "Unknown"}
+              </NxText>
+              <NxText variant="caption" numberOfLines={1} style={{ color: colors.mutedFg }}>
+                @{chat.other_user?.username || "user"}
+              </NxText>
+            </View>
+            <TouchableOpacity
+              testID="chat-menu-close"
+              onPress={busy ? undefined : onClose}
+              style={[styles.iconBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
+            >
+              <Feather name="x" size={17} color={colors.mutedFg} />
+            </TouchableOpacity>
+          </View>
+
+          <View style={{ borderTopWidth: StyleSheet.hairlineWidth, borderColor: colors.border }}>
+            {rows.map((row) => (
+              <TouchableOpacity
+                key={row.action}
+                testID={`chat-menu-${row.action}`}
+                disabled={busy}
+                onPress={() => onAction(row.action)}
+                style={styles.menuRow}
+              >
+                <View
+                  style={[
+                    styles.menuRowIcon,
+                    {
+                      backgroundColor: row.danger
+                        ? colors.danger + "1F"
+                        : colors.surfaceHigh,
+                    },
+                  ]}
+                >
+                  {row.mci ? (
+                    <MaterialCommunityIcons
+                      name={row.icon as any}
+                      size={19}
+                      color={row.danger ? colors.danger : colors.foreground}
+                    />
+                  ) : (
+                    <Feather
+                      name={row.icon as any}
+                      size={17}
+                      color={row.danger ? colors.danger : colors.foreground}
+                    />
+                  )}
+                </View>
+                <NxText
+                  style={{
+                    fontFamily: fonts.bodyMedium,
+                    fontSize: 15,
+                    color: row.danger ? colors.danger : colors.foreground,
+                  }}
+                >
+                  {row.label}
+                </NxText>
+                {busyAction === row.action ? (
+                  <ActivityIndicator size="small" color={colors.primary} style={{ marginLeft: "auto" }} />
+                ) : null}
+              </TouchableOpacity>
+            ))}
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
+function ConfirmDialog({
+  confirm,
+  onClose,
+  onConfirm,
+}: {
+  confirm: {
+    title: string;
+    message: string;
+    danger?: boolean;
+    confirmLabel: string;
+    onConfirm: () => void;
+  } | null;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  const { colors } = useTheme();
+  if (!confirm) return null;
+  const danger = confirm.danger ?? false;
+
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable
+        testID="confirm-backdrop"
+        style={{ flex: 1, backgroundColor: colors.overlay, alignItems: "center", justifyContent: "center", padding: 24 }}
+        onPress={onClose}
+      >
+        <Pressable
+          style={{
+            width: "100%",
+            maxWidth: 360,
+            borderRadius: 20,
+            padding: 22,
+            backgroundColor: colors.backgroundElevated,
+            borderWidth: StyleSheet.hairlineWidth,
+            borderColor: colors.border,
+          }}
+          onPress={(e) => e.stopPropagation()}
+        >
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+            <View
+              style={[
+                styles.menuRowIcon,
+                { backgroundColor: danger ? colors.danger + "1F" : colors.surfaceHigh },
+              ]}
+            >
+              <MaterialCommunityIcons
+                name={danger ? "alert-circle-outline" : "help-circle-outline"}
+                size={20}
+                color={danger ? colors.danger : colors.primary}
+              />
+            </View>
+            <NxText variant="titleSm" style={{ flex: 1 }}>{confirm.title}</NxText>
+          </View>
+          <NxText variant="bodySm" style={{ color: colors.mutedFg, marginTop: 12, lineHeight: 20 }}>
+            {confirm.message}
+          </NxText>
+          <View style={{ flexDirection: "row", gap: 10, marginTop: 20 }}>
+            <TouchableOpacity
+              testID="confirm-cancel"
+              onPress={onClose}
+              style={{
+                flex: 1,
+                paddingVertical: 12,
+                borderRadius: 12,
+                alignItems: "center",
+                backgroundColor: colors.surfaceHigh,
+              }}
+            >
+              <NxText style={{ fontFamily: fonts.bodySemi, color: colors.mutedFg }}>Cancel</NxText>
+            </TouchableOpacity>
+            <TouchableOpacity
+              testID="confirm-ok"
+              onPress={onConfirm}
+              style={{
+                flex: 1,
+                paddingVertical: 12,
+                borderRadius: 12,
+                alignItems: "center",
+                backgroundColor: danger ? colors.danger : colors.primary,
+              }}
+            >
+              <NxText style={{ fontFamily: fonts.bodySemi, color: danger ? "#FFFFFF" : colors.onPrimary }}>
+                {confirm.confirmLabel}
+              </NxText>
+            </TouchableOpacity>
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
   );
 }
 
@@ -1072,4 +1587,46 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   empty: { padding: spacing.xxl, alignItems: "center" },
+  archivedFolder: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginHorizontal: spacing.lg,
+    marginTop: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  menuSheet: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingBottom: 24,
+    paddingTop: 10,
+  },
+  menuHandle: {
+    width: 44,
+    height: 4,
+    borderRadius: 2,
+    alignSelf: "center",
+    marginBottom: 14,
+  },
+  menuRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    gap: 14,
+  },
+  menuRowIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
 });

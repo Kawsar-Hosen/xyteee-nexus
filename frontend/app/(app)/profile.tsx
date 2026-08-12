@@ -55,6 +55,7 @@ export default function Profile() {
   const [bondsCount, setBondsCount] = useState(0);
   const [notifCount, setNotifCount] = useState(0);
   const [reveriesCount, setReveriesCount] = useState(0);
+  const [reelsCount, setReelsCount] = useState(0);
   const [onlineSheetOpen, setOnlineSheetOpen] = useState(false);
   const [onlineStatusBusy, setOnlineStatusBusy] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
@@ -119,10 +120,11 @@ export default function Profile() {
   const loadData = useCallback(async () => {
     if (!token || !user) return;
     try {
-      const [storyResult, friendsResult, notifResult] = await Promise.all([
+      const [storyResult, friendsResult, notifResult, reelsResult] = await Promise.all([
         api<{ feed: any[] }>("/stories/feed", { token }),
         api<{ friends: any[] }>("/friends", { token }),
         api<{ notifications: any[] }>("/notifications", { token }),
+        api<{ reels: any[] }>(`/reels/user/${user.user_id}`, { token }),
       ]);
       const myStoryGroup = (storyResult.feed || []).find(
         (g: any) => g.user?.user_id === user.user_id
@@ -132,6 +134,7 @@ export default function Profile() {
       setReveriesCount(myStories.length);
       setBondsCount((friendsResult.friends || []).length);
       setNotifCount((notifResult.notifications || []).filter((n: any) => !n.read).length);
+      setReelsCount((reelsResult.reels || []).length);
       const imgs = myStories
         .filter((s: any) => s.media_url || s.image_url)
         .map((s: any) => s.media_url || s.image_url)
@@ -329,6 +332,8 @@ export default function Profile() {
             <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
             <StatCol value={String(reveriesCount)} label="Reveries" accent="#a78bfa" />
             <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
+            <StatCol value={String(reelsCount)} label="Reels" accent="#FF2D55" />
+            <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
             <StatCol value={sinceValue} label="Since" accent={colors.mutedFg} />
           </View>
         </Animated.View>
@@ -345,7 +350,7 @@ export default function Profile() {
             <NxText style={[styles.actionPrimaryLabel, { color: colors.onPrimary }]}>Edit Profile</NxText>
           </TouchableOpacity>
 
-          {/* Secondary row: Alerts + Share */}
+          {/* Secondary row: Alerts + Reels + Share */}
           <View style={styles.actionSecondaryRow}>
             <TouchableOpacity
               onPress={() => router.push("/notifications")}
@@ -357,6 +362,19 @@ export default function Profile() {
               {notifCount > 0 && (
                 <View style={[styles.notifBadge, { backgroundColor: colors.primary }]}>
                   <NxText style={styles.notifBadgeText}>{notifCount > 9 ? "9+" : notifCount}</NxText>
+                </View>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => router.push("/(app)/reels?mine=1")}
+              activeOpacity={0.82}
+              style={[styles.actionSecondary, { backgroundColor: colors.surface, borderColor: colors.border }]}
+            >
+              <Feather name="video" size={15} color={colors.foreground} />
+              <NxText style={[styles.actionSecondaryLabel, { color: colors.foreground }]}>Reels</NxText>
+              {reelsCount > 0 && (
+                <View style={[styles.notifBadge, { backgroundColor: "#FF2D55" }]}>
+                  <NxText style={styles.notifBadgeText}>{reelsCount > 9 ? "9+" : reelsCount}</NxText>
                 </View>
               )}
             </TouchableOpacity>
